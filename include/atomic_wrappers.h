@@ -16,10 +16,10 @@
 
 #pragma once
 
-#ifdef RELACY_TEST
+#ifdef RL_TEST
 #include <relacy/atomic.hpp>
-#include <relacy/var.hpp>
 #include <relacy/backoff.hpp>
+#include <relacy/var.hpp>
 #else
 #include <atomic>
 #include <thread>
@@ -27,13 +27,12 @@
 
 namespace tools {
 
-
 #ifdef RELACY_TEST
 template <typename T>
 using atomic = rl::atomic<T>;
 
 void this_thread_yield(debug_info_param info DEFAULTED_DEBUG_INFO) {
- rl::yield(1, info);
+  rl::yield(1, info);
 }
 
 #else
@@ -41,10 +40,8 @@ void this_thread_yield(debug_info_param info DEFAULTED_DEBUG_INFO) {
 template <typename T>
 using atomic = std::atomic<T>;
 
-void this_thread_yield() {
-  std::this_thread::yield();
-}
+void this_thread_yield() { std::this_thread::yield(); }
 
 #endif
 
-} // namespace tools
+}  // namespace tools

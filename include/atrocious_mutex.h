@@ -22,18 +22,16 @@ namespace tools {
 
 struct atrocious_mutex {
  public:
-   void lock() {
+  void lock() {
     while (!locked.compare_exchange_weak(false, true)) {
-        this_thread_yield();
+      this_thread_yield();
     }
-   }
+  }
 
-   void unlock() {
-    locked = false;
-   }
+  void unlock() { locked = false; }
 
  private:
   tools::atomic<bool> locked;
 };
 
-} // namespace tools
+}  // namespace tools
