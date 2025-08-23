@@ -27,13 +27,19 @@
 
 namespace tools {
 
-#ifdef RELACY_TEST
+#ifdef RL_TEST
 template <typename T>
 using atomic = rl::atomic<T>;
 
-void this_thread_yield(debug_info_param info DEFAULTED_DEBUG_INFO) {
+void this_thread_yield(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
   rl::yield(1, info);
 }
+
+inline constexpr auto memory_order_relaxed = rl::memory_order::mo_relaxed;
+inline constexpr auto memory_order_acquire = rl::memory_order::mo_acquire;
+inline constexpr auto memory_order_release = rl::memory_order::mo_release;
+inline constexpr auto memory_order_acq_rel = rl::memory_order::mo_acq_rel;
+inline constexpr auto memory_order_seq_cst = rl::memory_order::mo_seq_cst;
 
 #else
 
@@ -41,6 +47,12 @@ template <typename T>
 using atomic = std::atomic<T>;
 
 void this_thread_yield() { std::this_thread::yield(); }
+
+inline constexpr auto memory_order_relaxed = rl::memory_order::relaxed;
+inline constexpr auto memory_order_acquire = rl::memory_order::acquire;
+inline constexpr auto memory_order_release = rl::memory_order::release;
+inline constexpr auto memory_order_acq_rel = rl::memory_order::acq_rel;
+inline constexpr auto memory_order_seq_cst = rl::memory_order::seq_cst;
 
 #endif
 

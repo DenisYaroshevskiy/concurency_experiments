@@ -14,4 +14,25 @@
  * limitations under the License.
  */
 
+#define RL_TEST
 #include "atrocious_mutex.h"
+
+#include <relacy/relacy.hpp>
+#include <relacy/test_suite.hpp>
+#include <relacy/var.hpp>
+
+struct atrocious_mutex_test : rl::test_suite<atrocious_mutex_test, 2> {
+  rl::var<int> var;
+  tools::atrocious_mutex m;
+
+  void before() { var($) = 0; }
+
+  void thread(unsigned) {
+    std::lock_guard _{m};
+    var($) += 1;
+  }
+
+  void after() { RL_ASSERT(var($) == 2); }
+};
+
+int main() { rl::simulate<atrocious_mutex_test>(); }

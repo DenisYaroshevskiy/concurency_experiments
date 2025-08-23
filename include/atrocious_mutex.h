@@ -23,12 +23,14 @@ namespace tools {
 struct atrocious_mutex {
  public:
   void lock() {
-    while (!locked.compare_exchange_weak(false, true)) {
+    bool val = false;
+    while (!locked.compare_exchange_weak(val, true)) {
+      val = false;
       this_thread_yield();
     }
   }
 
-  void unlock() { locked = false; }
+  void unlock() { locked.store(false); }
 
  private:
   tools::atomic<bool> locked;

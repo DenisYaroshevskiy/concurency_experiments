@@ -1,0 +1,5 @@
+build/*
+.vscode
+temp-plot*
+.DS_Store
+vscode_view.code-workspace
