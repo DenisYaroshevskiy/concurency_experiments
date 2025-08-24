@@ -21,7 +21,7 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
-struct atrocious_mutex_test : rl::test_suite<atrocious_mutex_test, 2> {
+struct atrocious_mutex_test_var : rl::test_suite<atrocious_mutex_test_var, 2> {
   rl::var<int> var;
   tools::atrocious_mutex m;
 
@@ -35,4 +35,23 @@ struct atrocious_mutex_test : rl::test_suite<atrocious_mutex_test, 2> {
   void after() { RL_ASSERT(var($) == 2); }
 };
 
-int main() { rl::simulate<atrocious_mutex_test>(); }
+struct atrocious_mutex_test_atomic
+    : rl::test_suite<atrocious_mutex_test_atomic, 2> {
+  tools::atomic<int> atomic_var;
+  tools::atrocious_mutex m;
+
+  void before() { atomic_var.store(0, rl::mo_relaxed); }
+
+  void thread(unsigned) {
+    std::lock_guard _{m};
+    int val = atomic_var.load(rl::mo_relaxed);
+    atomic_var.store(val + 1, rl::mo_relaxed);
+  }
+
+  void after() { RL_ASSERT(atomic_var.load(rl::mo_relaxed) == 2); }
+};
+
+int main() {
+  rl::simulate<atrocious_mutex_test_var>();
+  rl::simulate<atrocious_mutex_test_atomic>();
+}

@@ -24,13 +24,13 @@ struct atrocious_mutex {
  public:
   void lock() {
     bool val = false;
-    while (!locked.compare_exchange_weak(val, true)) {
+    while (!locked.compare_exchange_weak(val, true, tools::memory_order_acquire)) {
       val = false;
       this_thread_yield();
     }
   }
 
-  void unlock() { locked.store(false); }
+  void unlock() { locked.store(false, tools::memory_order_release); }
 
  private:
   tools::atomic<bool> locked;
