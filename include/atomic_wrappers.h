@@ -18,7 +18,9 @@
 
 #ifdef RL_TEST
 #include <relacy/atomic.hpp>
+#include <relacy/atomic_fence.hpp>
 #include <relacy/backoff.hpp>
+#include <relacy/stdlib/mutex.hpp>
 #include <relacy/var.hpp>
 #else
 #include <atomic>
@@ -40,6 +42,43 @@ inline constexpr auto memory_order_acquire = rl::memory_order::mo_acquire;
 inline constexpr auto memory_order_release = rl::memory_order::mo_release;
 inline constexpr auto memory_order_acq_rel = rl::memory_order::mo_acq_rel;
 inline constexpr auto memory_order_seq_cst = rl::memory_order::mo_seq_cst;
+
+struct std_shared_mutex;
+class shared_mutex : rl::generic_mutex<std_shared_mutex>, rl::nocopy<> {
+  rl::debug_info_param constructor_info_;
+
+  using tag = std_shared_mutex;
+
+ public:
+  /*implicit*/ shared_mutex(rl::debug_info_param info DEFAULTED_DEBUG_INFO)
+      : constructor_info_(info) {
+    generic_mutex<tag>::init(false, false, false, true, constructor_info_);
+  }
+
+  ~shared_mutex() { rl::generic_mutex<tag>::deinit(constructor_info_); }
+
+  void lock(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    generic_mutex<tag>::lock_exclusive(info);
+  }
+
+  bool try_lock(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    return generic_mutex<tag>::try_lock_exclusive(info);
+  }
+
+  void unlock(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    generic_mutex<tag>::unlock_exclusive(info);
+  }
+};
+
+using rl::lock_guard;
+
+void asymmetric_thread_fence_light(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+  rl::atomic_thread_fence(memory_order_seq_cst, info);
+}
+
+void asymmetric_thread_fence_heavy(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+  rl::atomic_thread_fence(memory_order_seq_cst, info);
+}
 
 #else
 
