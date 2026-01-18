@@ -7,3 +7,4 @@ function(add_rl_test name source)
 endfunction()
 
 add_rl_test(atrocious_mutex_rl_test atrocious_mutex_rl_test.cpp)
+add_rl_test(rcu_0_test rcu_0_test.cpp)
