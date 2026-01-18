@@ -33,15 +33,17 @@ namespace tools {
 template <typename T>
 using atomic = rl::atomic<T>;
 
+using mutex = rl::mutex;
+
 void this_thread_yield(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
   rl::yield(1, info);
 }
 
-inline constexpr auto memory_order_relaxed = rl::memory_order::mo_relaxed;
-inline constexpr auto memory_order_acquire = rl::memory_order::mo_acquire;
-inline constexpr auto memory_order_release = rl::memory_order::mo_release;
-inline constexpr auto memory_order_acq_rel = rl::memory_order::mo_acq_rel;
-inline constexpr auto memory_order_seq_cst = rl::memory_order::mo_seq_cst;
+inline constexpr auto memory_order_relaxed = rl::memory_order::relaxed;
+inline constexpr auto memory_order_acquire = rl::memory_order::acquire;
+inline constexpr auto memory_order_release = rl::memory_order::release;
+inline constexpr auto memory_order_acq_rel = rl::memory_order::acq_rel;
+inline constexpr auto memory_order_seq_cst = rl::memory_order::seq_cst;
 
 struct std_shared_mutex;
 class shared_mutex : rl::generic_mutex<std_shared_mutex>, rl::nocopy<> {
@@ -85,13 +87,16 @@ void asymmetric_thread_fence_heavy(rl::debug_info_param info DEFAULTED_DEBUG_INF
 template <typename T>
 using atomic = std::atomic<T>;
 
+template <typename... Ts>
+using lock_guard = std::lock_guard<Ts...>;
+
 void this_thread_yield() { std::this_thread::yield(); }
 
-inline constexpr auto memory_order_relaxed = rl::memory_order::relaxed;
-inline constexpr auto memory_order_acquire = rl::memory_order::acquire;
-inline constexpr auto memory_order_release = rl::memory_order::release;
-inline constexpr auto memory_order_acq_rel = rl::memory_order::acq_rel;
-inline constexpr auto memory_order_seq_cst = rl::memory_order::seq_cst;
+inline constexpr auto memory_order_relaxed = std::memory_order::relaxed;
+inline constexpr auto memory_order_acquire = std::memory_order::acquire;
+inline constexpr auto memory_order_release = std::memory_order::release;
+inline constexpr auto memory_order_acq_rel = std::memory_order::acq_rel;
+inline constexpr auto memory_order_seq_cst = std::memory_order::seq_cst;
 
 #endif
 
