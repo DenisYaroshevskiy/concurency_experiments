@@ -28,6 +28,11 @@ struct rcu_domain {
     rcu_domain* domain_;
 
     tls(rcu_domain* domain);
+
+    tls(const tls&) = delete;
+    tls(tls&&) = delete;
+    tls& operator=(const tls&&) = delete;
+    tls& operator=(tls&&) = delete;
     ~tls();
 
     void enter() { counter.fetch_add(1); }

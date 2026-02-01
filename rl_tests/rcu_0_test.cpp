@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "relacy/thread_local.hpp"
 #define RL_TEST
 #include "rcu_0.h"
 
@@ -23,44 +24,22 @@
 
 #include <memory>
 
-template <typename Domain>
-struct domain_test {
-  Domain domain;
-  using tls_type = typename Domain::tls;
-
-  std::vector<std::unique_ptr<tls_type>> tls_vec;
-
-  tls_type& tls_access(unsigned i) {
-    if (tls_vec.size() < i) {
-        tls_vec.resize(i * 2);
-    }
-
-    if (!tls_vec[i]) {
-        tls_vec[i] = std::make_unique<tls_type>(&domain);
-    }
-    return *tls_vec[i];
-  }
-
-};
 
 template <typename Domain>
 struct rcu_test_var : rl::test_suite<rcu_test_var<Domain>, 3> {
   rl::var<int> var;
 
-  domain_test<Domain> env;
+  Domain domain;
 
-  void before() {
-    var($) = 0;
-  }
-
-  auto& tls(unsigned idx) {
-    return env.tls_access(idx);
-  }
+  using tls_type = typename Domain::tls;
+  rl::cxx_thread_local_var<tls_type> tls_storage;
 
 
   void thread(unsigned idx) {
-    tls(idx).enter();
-    tls(idx).exit();
+    auto& tls = tls_storage.get([&]() { return tls_type{&domain}; });
+
+    tls.enter();
+    tls.exit();
   }
   void after() {}
 };
