@@ -69,7 +69,7 @@ void rcu_domain::synchronize() {
 
     for (const auto* tls : tls_vec) {
       auto loaded = tls->counter.load();
-      if (loaded) {
+      if (loaded & 1) {
         res.emplace_back(tls, tls->counter);
       }
     }
@@ -77,22 +77,18 @@ void rcu_domain::synchronize() {
   };
 
   auto to_clear_vec = collect();
-  auto to_clear_map =
-      std::unordered_map(to_clear_vec.begin(), to_clear_vec.end());
 
-  while (!to_clear_map.empty()) {
+  while (!to_clear_vec.empty()) {
     tools::this_thread_yield();
     auto cur = collect();
+    auto cur_map =
+      std::unordered_map(to_clear_vec.begin(), to_clear_vec.end());
 
-    for (auto [tls, count] : cur) {
-      auto found = to_clear_map.find(tls);
-      if (found == to_clear_map.end()) {
-        continue;
-      }
-      if (count != found->second) {
-        to_clear_map.erase(found);
-      }
-    }
+    std::erase_if(to_clear_vec, [&](const auto& e) {
+      auto [tls, count] = e;
+      auto found = cur_map.find(tls);
+      return found == cur_map.end() || found->second == count;
+    });
   }
 }
 
