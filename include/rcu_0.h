@@ -35,8 +35,14 @@ struct rcu_domain {
     tls& operator=(tls&&) = delete;
     ~tls();
 
-    void enter() { counter.fetch_add(1); }
-    void exit() { counter.fetch_add(1); }
+    void enter() {
+      counter.fetch_add(1, tools::memory_order_relaxed);
+      tools::asymmetric_thread_fence_light();
+    }
+    void exit() {
+      tools::asymmetric_thread_fence_light();
+      counter.fetch_add(1, tools::memory_order_relaxed);
+    }
   };
 
   tools::mutex tls_vec_m;
@@ -45,22 +51,21 @@ struct rcu_domain {
   void synchronize();
 };
 
-inline
-rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
+inline rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
   tools::lock_guard _{domain_->tls_vec_m};
   domain_->tls_vec.push_back(this);
 }
 
-inline
-rcu_domain::tls::~tls() {
+inline rcu_domain::tls::~tls() {
   tools::lock_guard _{domain_->tls_vec_m};
   std::iter_swap(std::ranges::find(domain_->tls_vec, this),
                  std::prev(domain_->tls_vec.end()));
   domain_->tls_vec.pop_back();
 }
 
-inline
-void rcu_domain::synchronize() {
+inline void rcu_domain::synchronize() {
+  tools::asymmetric_thread_fence_heavy();
+
   auto collect = [&] {
     tools::lock_guard _{tls_vec_m};
 
@@ -68,7 +73,7 @@ void rcu_domain::synchronize() {
     res.reserve(tls_vec.size());
 
     for (const auto* tls : tls_vec) {
-      auto loaded = tls->counter.load();
+      auto loaded = tls->counter.load(tools::memory_order_relaxed);
       if (loaded & 1) {
         res.emplace_back(tls, tls->counter);
       }
@@ -81,8 +86,7 @@ void rcu_domain::synchronize() {
   while (!to_clear_vec.empty()) {
     tools::this_thread_yield();
     auto cur = collect();
-    auto cur_map =
-      std::unordered_map(to_clear_vec.begin(), to_clear_vec.end());
+    auto cur_map = std::unordered_map(cur.begin(), cur.end());
 
     std::erase_if(to_clear_vec, [&](const auto& e) {
       auto [tls, count] = e;
@@ -90,6 +94,8 @@ void rcu_domain::synchronize() {
       return found == cur_map.end() || found->second == count;
     });
   }
+
+  tools::asymmetric_thread_fence_heavy();
 }
 
 }  // namespace v0
