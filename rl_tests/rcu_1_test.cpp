@@ -17,8 +17,8 @@
 #include "relacy/context.hpp"
 #include "relacy/thread_local.hpp"
 #define RL_TEST
-#include "rcu_0.h"
+#include "rcu_1.h"
 
 #include "rcu_rl_tests.h"
 
-int main() { simulate<v0::rcu_domain>(); }
+int main() { simulate<v1::rcu_domain>(); }
