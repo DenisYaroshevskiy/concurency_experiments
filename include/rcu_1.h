@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <memory>
 
+/*
+ * Introduces generation counter.
+ */
 namespace v1 {
 
 struct rcu_domain {

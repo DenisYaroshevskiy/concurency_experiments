@@ -20,22 +20,20 @@
 #include <memory>
 
 /*
- * +1 entry,
- * +1 exit
- * simplest fully funcitonal design.
-*/
-
-namespace v0 {
+ * Background thread reclaimer.
+ */
+namespace v2 {
 
 struct rcu_domain {
   using counter_t = std::uint64_t;
 
   struct tls;
 
-  struct obj_base{};
+  struct obj_base {};
 
   tools::mutex tls_vec_m;
   std::vector<tls*> tls_vec;
+  rl::atomic<counter_t> generation = 1;
 
   void synchronize();
   template <typename T, typename D>
@@ -43,32 +41,31 @@ struct rcu_domain {
     synchronize();
     d(x);
   }
-  void barrier() {
-    synchronize();
-  }
+  void barrier() { synchronize(); }
 };
 
 struct rcu_domain::tls {
-    tools::atomic<counter_t> counter;
-    rcu_domain* domain_;
+  tools::atomic<counter_t> counter;
+  rcu_domain* domain_;
 
-    tls(rcu_domain* domain);
+  tls(rcu_domain* domain);
 
-    tls(const tls&) = delete;
-    tls(tls&&) = delete;
-    tls& operator=(const tls&&) = delete;
-    tls& operator=(tls&&) = delete;
-    ~tls();
+  tls(const tls&) = delete;
+  tls(tls&&) = delete;
+  tls& operator=(const tls&&) = delete;
+  tls& operator=(tls&&) = delete;
+  ~tls();
 
-    void enter() {
-      counter.fetch_add(1, tools::memory_order_relaxed);
-      tools::asymmetric_thread_fence_light();
-    }
-    void exit() {
-      tools::asymmetric_thread_fence_light();
-      counter.fetch_add(1, tools::memory_order_relaxed);
-    }
-  };
+  void enter() {
+    counter_t loaded_generation = domain_->generation.load(tools::memory_order_relaxed);
+    counter.store(loaded_generation, tools::memory_order_relaxed);
+    tools::asymmetric_thread_fence_light();
+  }
+  void exit() {
+    tools::asymmetric_thread_fence_light();
+    counter.store(0, tools::memory_order_relaxed);
+  }
+};
 
 inline rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
   tools::lock_guard _{domain_->tls_vec_m};
@@ -85,36 +82,24 @@ inline rcu_domain::tls::~tls() {
 inline void rcu_domain::synchronize() {
   tools::asymmetric_thread_fence_heavy();
 
-  auto collect = [&] {
-    tools::lock_guard _{tls_vec_m};
+  tools::lock_guard _{tls_vec_m};
 
-    std::vector<std::pair<const tls*, counter_t>> res;
-    res.reserve(tls_vec.size());
+  counter_t desired = generation.load(tools::memory_order_relaxed) + 1;
+  generation.store(desired, tools::memory_order_relaxed);
 
-    for (const auto* tls : tls_vec) {
-      auto loaded = tls->counter.load(tools::memory_order_relaxed);
-      if (loaded & 1) {
-        res.emplace_back(tls, tls->counter);
-      }
-    }
-    return res;
-  };
-
-  auto to_clear_vec = collect();
-
-  while (!to_clear_vec.empty()) {
-    tools::this_thread_yield();
-    auto cur = collect();
-    auto cur_map = std::unordered_map(cur.begin(), cur.end());
-
-    std::erase_if(to_clear_vec, [&](const auto& e) {
-      auto [tls, count] = e;
-      auto found = cur_map.find(tls);
-      return found == cur_map.end() || found->second == count;
+  while (true) {
+    bool wait_more = std::ranges::any_of(tls_vec, [desired](const tls* x) {
+      counter_t tls_counter = x->counter.load(tools::memory_order_relaxed);
+      return 0 < tls_counter && tls_counter < desired;
     });
-  }
 
+    if (!wait_more) {
+      break;
+    }
+
+    tools::this_thread_yield();
+  }
   tools::asymmetric_thread_fence_heavy();
 }
 
-}  // namespace v0
+}  // namespace v2
