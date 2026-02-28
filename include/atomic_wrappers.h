@@ -20,10 +20,15 @@
 #include <relacy/atomic.hpp>
 #include <relacy/atomic_fence.hpp>
 #include <relacy/backoff.hpp>
+#include <relacy/dyn_thread.hpp>
 #include <relacy/stdlib/mutex.hpp>
 #include <relacy/var.hpp>
+#include <functional>
+#include <memory>
 #else
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <thread>
 #endif
 
@@ -97,6 +102,8 @@ inline constexpr auto memory_order_acquire = std::memory_order::acquire;
 inline constexpr auto memory_order_release = std::memory_order::release;
 inline constexpr auto memory_order_acq_rel = std::memory_order::acq_rel;
 inline constexpr auto memory_order_seq_cst = std::memory_order::seq_cst;
+
+// TODO: production periodic_runner
 
 #endif
 

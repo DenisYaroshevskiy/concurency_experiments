@@ -89,15 +89,7 @@ struct mailbox_multi : rl::test_suite<mailbox_multi, 2> {
     } else {
       std::vector<move_only> collected;
       while (static_cast<int>(collected.size()) < kCount) {
-        std::vector<move_only> batch;
-        mb.try_get(batch);
-        for (auto& item : batch) {
-          RL_ASSERT(!item.moved_from_);
-          collected.push_back(std::move(item));
-        }
-        if (batch.empty()) {
-          rl::yield(1, $);
-        }
+        mb.try_get(collected);
       }
       RL_ASSERT(static_cast<int>(collected.size()) == kCount);
       for (int i = 0; i < kCount; ++i) {

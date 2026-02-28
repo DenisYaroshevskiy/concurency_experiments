@@ -73,9 +73,9 @@ bool mailbox<T>::try_get(std::vector<T>& out) {
     return false;
   }
 
-  // We don't want to just move the vector to avoid moving the memory
-  // in malloc.
-  out.assign(std::make_move_iterator(cur->begin()),
+  // Append rather than replace so callers can collect from multiple mailboxes.
+  out.insert(out.end(),
+             std::make_move_iterator(cur->begin()),
              std::make_move_iterator(cur->end()));
   cur->clear();
   return true;

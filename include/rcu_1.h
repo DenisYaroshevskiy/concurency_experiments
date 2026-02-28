@@ -36,11 +36,13 @@ struct rcu_domain {
   rl::atomic<counter_t> generation = 1;
 
   void synchronize();
+
   template <typename T, typename D>
   void retire(T* x, D d) {
     synchronize();
     d(x);
   }
+
   void barrier() { synchronize(); }
 };
 
@@ -57,13 +59,20 @@ struct rcu_domain::tls {
   ~tls();
 
   void enter() {
-    counter_t loaded_generation = domain_->generation.load(tools::memory_order_relaxed);
+    counter_t loaded_generation =
+        domain_->generation.load(tools::memory_order_relaxed);
     counter.store(loaded_generation, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_light();
   }
   void exit() {
     tools::asymmetric_thread_fence_light();
     counter.store(0, tools::memory_order_relaxed);
+  }
+
+  template <typename T, typename D>
+  void retire(T* x, D d) {
+    domain_->synchronize();
+    d(x);
   }
 };
 

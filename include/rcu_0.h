@@ -23,7 +23,7 @@
  * +1 entry,
  * +1 exit
  * simplest fully funcitonal design.
-*/
+ */
 
 namespace v0 {
 
@@ -32,43 +32,42 @@ struct rcu_domain {
 
   struct tls;
 
-  struct obj_base{};
+  struct obj_base {};
 
   tools::mutex tls_vec_m;
   std::vector<tls*> tls_vec;
 
   void synchronize();
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    synchronize();
-    d(x);
-  }
-  void barrier() {
-    synchronize();
-  }
+
+  void barrier() { synchronize(); }
 };
 
 struct rcu_domain::tls {
-    tools::atomic<counter_t> counter;
-    rcu_domain* domain_;
+  tools::atomic<counter_t> counter;
+  rcu_domain* domain_;
 
-    tls(rcu_domain* domain);
+  tls(rcu_domain* domain);
 
-    tls(const tls&) = delete;
-    tls(tls&&) = delete;
-    tls& operator=(const tls&&) = delete;
-    tls& operator=(tls&&) = delete;
-    ~tls();
+  tls(const tls&) = delete;
+  tls(tls&&) = delete;
+  tls& operator=(const tls&&) = delete;
+  tls& operator=(tls&&) = delete;
+  ~tls();
 
-    void enter() {
-      counter.fetch_add(1, tools::memory_order_relaxed);
-      tools::asymmetric_thread_fence_light();
-    }
-    void exit() {
-      tools::asymmetric_thread_fence_light();
-      counter.fetch_add(1, tools::memory_order_relaxed);
-    }
-  };
+  void enter() {
+    counter.fetch_add(1, tools::memory_order_relaxed);
+    tools::asymmetric_thread_fence_light();
+  }
+  void exit() {
+    tools::asymmetric_thread_fence_light();
+    counter.fetch_add(1, tools::memory_order_relaxed);
+  }
+  template <typename T, typename D>
+  void retire(T* x, D d) {
+    domain_->synchronize();
+    d(x);
+  }
+};
 
 inline rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
   tools::lock_guard _{domain_->tls_vec_m};
