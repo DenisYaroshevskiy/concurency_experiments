@@ -89,7 +89,6 @@ inline void rcu_domain::synchronize() {
       counter_t tls_counter = x->counter.load(tools::memory_order_relaxed);
       return 0 < tls_counter && tls_counter < desired;
     });
-    tools::asymmetric_thread_fence_heavy();
 
     if (!wait_more) {
       break;
@@ -97,6 +96,7 @@ inline void rcu_domain::synchronize() {
 
     tools::this_thread_yield();
   }
+  tools::asymmetric_thread_fence_heavy();
 }
 
 }  // namespace v1
