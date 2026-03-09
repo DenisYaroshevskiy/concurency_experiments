@@ -146,32 +146,26 @@ inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_some_clean_up_tasks() {
   std::vector<clean_up_task> todo;
   tools::lock_guard _{tls_vec_m};
-  for (auto& x : tls_vec) {
-    x->to_clean_up_.try_get(todo);
-  }
+  for (auto& x : tls_vec) x->to_clean_up_.try_get(todo);
   return todo;
 }
 
 // Collect from every mailbox, retrying any that were temporarily locked.
+// Also evicts dead tls_impl entries (use_count == 1 means owning tls destroyed).
 inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_all_clean_up_tasks() {
   std::vector<clean_up_task> todo;
-  std::vector<std::shared_ptr<tls_impl>> busy;
-
   tools::lock_guard _{tls_vec_m};
-
-  for (auto& x : tls_vec) {
-    if (!x->to_clean_up_.try_get(todo)) {
-      busy.push_back(x);
-    }
-  }
-
-  while (!busy.empty()) {
-    tools::this_thread_yield();
-    std::erase_if(busy,
-                  [&todo](auto& x) { return x->to_clean_up_.try_get(todo); });
-  }
-
+  bool any_busy;
+  do {
+    any_busy = false;
+    std::erase_if(tls_vec, [&](const auto& x) {
+      bool drained = x->to_clean_up_.try_get(todo);
+      if (!drained) any_busy = true;
+      return drained && x.use_count() == 1;
+    });
+    if (any_busy) tools::this_thread_yield();
+  } while (any_busy);
   return todo;
 }
 
