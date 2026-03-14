@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Denis Yaroshevskiy
+ * Copyright 2026 Denis Yaroshevskiy
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -156,16 +156,18 @@ inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_all_clean_up_tasks() {
   std::vector<clean_up_task> todo;
   tools::lock_guard _{tls_vec_m};
-  bool any_busy;
-  do {
-    any_busy = false;
-    std::erase_if(tls_vec, [&](const auto& x) {
-      bool drained = x->to_clean_up_.try_get(todo);
-      if (!drained) any_busy = true;
-      return drained && x.use_count() == 1;
+  std::vector<std::weak_ptr<tls_impl>> busy;
+  std::erase_if(tls_vec, [&](const auto& x) {
+    bool drained = x->to_clean_up_.try_get(todo);
+    if (!drained) busy.emplace_back(x);
+    return drained && x.use_count() == 1;
+  });
+  while (!busy.empty()) {
+    tools::this_thread_yield();
+    std::erase_if(busy, [&todo](const auto& w) {
+      return w.lock()->to_clean_up_.try_get(todo);
     });
-    if (any_busy) tools::this_thread_yield();
-  } while (any_busy);
+  }
   return todo;
 }
 
