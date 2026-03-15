@@ -78,6 +78,7 @@ struct rcu_tls_reclaimer {
   struct stage_data {
     std::vector<task> tasks;
     time_proxy oldest_task = std::numeric_limits<time_proxy>::max();
+    tools::var<stage_data*> self = this;
   };
 
   tools::atomic<stage_data*> waiting_for_sync_;
@@ -104,6 +105,7 @@ inline std::size_t rcu_tls_reclaimer::push(task t, time_proxy tp) {
 
   {
     auto* cur = waiting_for_sync_.exchange(nullptr, tools::memory_order_acquire);
+    RL_ASSERT(cur->self() == cur);
 
     cur->tasks.push_back(std::move(t));
     if (cur->tasks.size() == 1) cur->oldest_task = tp;
@@ -129,7 +131,7 @@ inline rcu_tls_reclaimer::time_proxy rcu_tls_reclaimer::propagate() {
     auto* fresh = new stage_data{};
     if (!waiting_for_sync_.compare_exchange_strong(
             new_syncing, fresh,
-            tools::memory_order_acquire, tools::memory_order_relaxed)) {
+            tools::memory_order_acq_rel, tools::memory_order_relaxed)) {
       delete fresh;
     }
   }
@@ -176,7 +178,7 @@ inline std::vector<rcu_tls_reclaimer::task> rcu_tls_reclaimer::get_all_tasks() {
     if (!s) return;
     auto* fresh = new stage_data{};
     if (!a.compare_exchange_strong(s, fresh,
-                                   tools::memory_order_acquire,
+                                   tools::memory_order_acq_rel,
                                    tools::memory_order_relaxed)) {
       delete fresh;
       return;

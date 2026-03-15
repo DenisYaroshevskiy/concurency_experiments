@@ -66,6 +66,35 @@ class shared_mutex : rl::generic_mutex<std_shared_mutex>, rl::nocopy<> {
   }
 };
 
+template<typename T>
+struct var_write_proxy {
+  T value;
+  rl::debug_info info;
+
+  var_write_proxy(T v, rl::debug_info info = std::source_location::current())
+      : value(std::move(v)), info(info) {}
+};
+
+template<typename T>
+struct var {
+  rl::var<T> impl_;
+
+  var() = default;
+  var(T val) : impl_(val) {}
+
+  T operator()(rl::debug_info_param info DEFAULTED_DEBUG_INFO) const { return T(impl_(info)); }
+
+  var& operator=(var_write_proxy<T> w) { impl_(w.info) = std::move(w.value); return *this; }
+  var& operator=(var const& other)     { impl_(rl::debug_info{}) = other(); return *this; }
+
+  friend bool operator< (var const& a, var const& b) { return a() <  b(); }
+  friend bool operator<=(var const& a, var const& b) { return a() <= b(); }
+  friend bool operator> (var const& a, var const& b) { return a() >  b(); }
+  friend bool operator>=(var const& a, var const& b) { return a() >= b(); }
+  friend bool operator==(var const& a, var const& b) { return a() == b(); }
+  friend bool operator!=(var const& a, var const& b) { return a() != b(); }
+};
+
 using rl::lock_guard;
 
 void asymmetric_thread_fence_light(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
@@ -91,6 +120,9 @@ inline constexpr auto memory_order_acquire = std::memory_order::acquire;
 inline constexpr auto memory_order_release = std::memory_order::release;
 inline constexpr auto memory_order_acq_rel = std::memory_order::acq_rel;
 inline constexpr auto memory_order_seq_cst = std::memory_order::seq_cst;
+
+template<typename T>
+using var = T;
 
 // TODO: production periodic_runner
 
