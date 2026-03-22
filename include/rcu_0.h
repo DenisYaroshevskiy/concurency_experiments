@@ -28,6 +28,12 @@ struct rcu_domain {
 
   void synchronize();
 
+  template <typename T, typename D>
+  void retire(T* x, D d) {
+    synchronize();
+    d(x);
+  }
+
   void barrier() { synchronize(); }
 };
 

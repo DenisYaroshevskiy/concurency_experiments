@@ -59,11 +59,11 @@ struct rcu_test_base
   }
 
   template <typename T, typename D = std::default_delete<T>>
-  void retire(T* ptr, D d = {},
+  void retire(tls_type& tls, T* ptr, D d = {},
               rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
     auto msg = std::format("retire({})", static_cast<const void*>(ptr));
     rl::ctx().exec_log_msg(info, msg.c_str());
-    domain.retire(ptr, d);
+    tls.retire(ptr, d);
   }
 };
 
@@ -225,8 +225,9 @@ struct rcu_test_retire : rcu_test_base<rcu_test_retire, Domain, 2> {
   }
 
   void thread_write() {
+    auto tls = this->make_tls();
     auto* upd = new rl::var<int>(2);
-    this->retire(config.exchange(upd, rl::memory_order_acq_rel));
+    this->retire(tls, config.exchange(upd, rl::memory_order_acq_rel));
   }
 
   void thread_(unsigned idx) {
@@ -253,7 +254,7 @@ struct rcu_test_barrier_concurrent
     auto tls = this->make_tls();
     auto* upd = new rl::var<int>(2);
     auto* old = config.exchange(upd, rl::memory_order_acq_rel);
-    tls.retire(old, std::default_delete<const rl::var<int>>{});
+    this->retire(tls, old);
   }
 
   void thread_read() {
