@@ -23,9 +23,9 @@
  *
  *   waiting_for_sync  — tasks added since the last synchronize began.
  *   syncing           — tasks that were in waiting_for_sync when the last
- *                       synchronize started; they become ready once it completes.
- *   ready             — tasks that have passed a full synchronize cycle and
- *                       may safely be executed by the owning thread.
+ *                       synchronize started; they become ready once it
+ * completes. ready             — tasks that have passed a full synchronize
+ * cycle and may safely be executed by the owning thread.
  *
  * Stage advancement is done by calling propagate() after each synchronize.
  * It atomically moves: syncing → ready, waiting_for_sync → syncing.
@@ -83,27 +83,32 @@ struct rcu_tls_reclaimer {
   tools::atomic<tools::var<stage_data>*> waiting_for_sync_;
   tools::atomic<tools::var<stage_data>*> syncing_;
   tools::atomic<tools::var<stage_data>*> ready_;
+  tools::atomic<tools::var<stage_data>*> free_buffer_;
 };
 
 inline rcu_tls_reclaimer::rcu_tls_reclaimer() {
   // Only waiting_for_sync starts with an allocated batch; the other stages
   // start null (nothing to sync or execute yet).
-  waiting_for_sync_.store(new tools::var<stage_data>{}, tools::memory_order_relaxed);
+  waiting_for_sync_.store(new tools::var<stage_data>{},
+                          tools::memory_order_relaxed);
   syncing_.store(nullptr, tools::memory_order_relaxed);
   ready_.store(nullptr, tools::memory_order_relaxed);
+  free_buffer_.store(nullptr, tools::memory_order_relaxed);
 }
 
 inline rcu_tls_reclaimer::~rcu_tls_reclaimer() {
   delete waiting_for_sync_.load(tools::memory_order_relaxed);
   delete syncing_.load(tools::memory_order_relaxed);
   delete ready_.load(tools::memory_order_relaxed);
+  delete free_buffer_.load(tools::memory_order_relaxed);
 }
 
 inline std::size_t rcu_tls_reclaimer::push(task t, time_proxy tp) {
   std::size_t res;
 
   {
-    auto* cur = waiting_for_sync_.exchange(nullptr, tools::memory_order_acquire);
+    auto* cur =
+        waiting_for_sync_.exchange(nullptr, tools::memory_order_acquire);
 
     auto& data = cur->write();
     data.tasks.push_back(std::move(t));
@@ -118,19 +123,22 @@ inline std::size_t rcu_tls_reclaimer::push(task t, time_proxy tp) {
     if (!r) return res;
 
     for (auto& ready_task : r->write().tasks) ready_task();
-    delete r;
+    r->write() = stage_data{};
+    delete free_buffer_.exchange(r, tools::memory_order_release);
   }
 
   return res;
 }
 
 inline rcu_tls_reclaimer::time_proxy rcu_tls_reclaimer::propagate() {
-  tools::var<stage_data>* new_syncing = waiting_for_sync_.load(tools::memory_order_relaxed);
+  tools::var<stage_data>* new_syncing =
+      waiting_for_sync_.load(tools::memory_order_relaxed);
   if (new_syncing != nullptr) {
-    auto* fresh = new tools::var<stage_data>{};
+    auto* fresh = free_buffer_.exchange(nullptr, tools::memory_order_acquire);
+    if (!fresh) fresh = new tools::var<stage_data>{};
     if (!waiting_for_sync_.compare_exchange_strong(
-            new_syncing, fresh,
-            tools::memory_order_acq_rel, tools::memory_order_relaxed)) {
+            new_syncing, fresh, tools::memory_order_acq_rel,
+            tools::memory_order_relaxed)) {
       delete fresh;
     }
   }
@@ -150,7 +158,9 @@ inline rcu_tls_reclaimer::time_proxy rcu_tls_reclaimer::propagate() {
   } else {
     auto& dst = cur_ready->write();
     auto& src = new_ready->write();
-    dst.tasks.insert(dst.tasks.end(), std::make_move_iterator(src.tasks.begin()), std::make_move_iterator(src.tasks.end()));
+    dst.tasks.insert(dst.tasks.end(),
+                     std::make_move_iterator(src.tasks.begin()),
+                     std::make_move_iterator(src.tasks.end()));
     dst.oldest_task = std::min(dst.oldest_task, src.oldest_task);
     delete new_ready;
   }
@@ -160,12 +170,14 @@ inline rcu_tls_reclaimer::time_proxy rcu_tls_reclaimer::propagate() {
   return res;
 }
 
-inline std::vector<rcu_tls_reclaimer::task> rcu_tls_reclaimer::try_steal_ready() {
+inline std::vector<rcu_tls_reclaimer::task>
+rcu_tls_reclaimer::try_steal_ready() {
   auto* r = ready_.exchange(nullptr, tools::memory_order_acquire);
   if (!r) return {};
 
   auto tasks = std::move(r->write().tasks);
-  delete r;
+  r->write() = stage_data{};
+  delete free_buffer_.exchange(r, tools::memory_order_release);
   return tasks;
 }
 
@@ -176,8 +188,7 @@ inline std::vector<rcu_tls_reclaimer::task> rcu_tls_reclaimer::get_all_tasks() {
     tools::var<stage_data>* s = a.load(tools::memory_order_relaxed);
     if (!s) return;
     auto* fresh = new tools::var<stage_data>{};
-    if (!a.compare_exchange_strong(s, fresh,
-                                   tools::memory_order_acq_rel,
+    if (!a.compare_exchange_strong(s, fresh, tools::memory_order_acq_rel,
                                    tools::memory_order_relaxed)) {
       delete fresh;
       return;
