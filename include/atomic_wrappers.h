@@ -5,7 +5,7 @@
 
 #pragma once
 
-#ifdef RL_TEST
+#ifdef TOOLS_RL_TEST
 #include <relacy/atomic.hpp>
 #include <relacy/atomic_fence.hpp>
 #include <relacy/backoff.hpp>
@@ -14,6 +14,7 @@
 #include <relacy/var.hpp>
 #include <functional>
 #include <memory>
+#include "shared_ptr.h"
 #else
 #include <atomic>
 #include <functional>
@@ -24,7 +25,7 @@
 
 namespace tools {
 
-#ifdef RL_TEST
+#ifdef TOOLS_RL_TEST
 template <typename T>
 using atomic = rl::atomic<T>;
 
@@ -96,6 +97,16 @@ void asymmetric_thread_fence_heavy(rl::debug_info_param info DEFAULTED_DEBUG_INF
   rl::atomic_thread_fence(memory_order_seq_cst, info);
 }
 
+void thread_fence_seq_cst(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+  rl::atomic_thread_fence(memory_order_seq_cst, info);
+}
+
+template <typename T>
+using shared_ptr = rl_extra::shared_ptr<T>;
+
+template <typename T>
+shared_ptr<T> make_shared() { return rl_extra::make_shared<T>(); }
+
 #else
 
 template <typename T>
@@ -105,6 +116,8 @@ template <typename... Ts>
 using lock_guard = std::lock_guard<Ts...>;
 
 void this_thread_yield() { std::this_thread::yield(); }
+
+void thread_fence_seq_cst() { std::atomic_thread_fence(std::memory_order_seq_cst); }
 
 inline constexpr auto memory_order_relaxed = std::memory_order::relaxed;
 inline constexpr auto memory_order_acquire = std::memory_order::acquire;
@@ -122,6 +135,12 @@ struct var {
   const T& read() const { return value_; }
   T& write() { return value_; }
 };
+
+template <typename T>
+using shared_ptr = std::shared_ptr<T>;
+
+template <typename T>
+shared_ptr<T> make_shared() { return std::make_shared<T>(); }
 
 // TODO: production periodic_runner
 

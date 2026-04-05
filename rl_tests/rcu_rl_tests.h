@@ -279,6 +279,28 @@ struct rcu_test_barrier_concurrent
 };
 
 template <typename Domain>
+struct rcu_test_retire_then_tls_death
+    : rcu_test_base<rcu_test_retire_then_tls_death, Domain, 2> {
+  rl::atomic<int> deleted{0};
+
+  void thread_(unsigned idx) {
+    if (idx == 0) {
+      auto tls = this->make_tls();
+      this->retire(tls, &deleted, [this](rl::atomic<int>* p) {
+        p->store(1, rl::memory_order_relaxed);
+      });
+    } else {
+      this->barrier();
+    }
+  }
+
+  void after() {
+    this->barrier();
+    RL_ASSERT(deleted.load(rl::memory_order_relaxed) == 1);
+  }
+};
+
+template <typename Domain>
 void simulate() {
   rl::simulate<rcu_test_no_mutation<Domain>>();
   rl::simulate<rcu_test_access_and_sync<Domain>>();
@@ -287,6 +309,7 @@ void simulate() {
   rl::simulate<rcu_test_sync_delete<Domain>>();
   rl::simulate<rcu_test_retire<Domain>>();
   rl::simulate<rcu_test_barrier_concurrent<Domain>>();
+  rl::simulate<rcu_test_retire_then_tls_death<Domain>>();
 }
 
 #endif  // RCU_RL_TESTS_H

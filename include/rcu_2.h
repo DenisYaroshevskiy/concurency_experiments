@@ -4,7 +4,7 @@
 
 
 #include <atomic_wrappers.h>
-#include <mailbox.h>
+#include <owner_stealer.h>
 
 #include <algorithm>
 #include <functional>
@@ -41,7 +41,7 @@ struct rcu_domain {
   std::vector<reader_tls*> reader_tls_vec;
 
   tools::mutex reclaim_tls_vec_m;
-  std::vector<std::shared_ptr<reclaim_tls>> reclaim_tls_vec;
+  std::vector<tools::shared_ptr<reclaim_tls>> reclaim_tls_vec;
 
   rl::atomic<counter_t> generation = 1;
 
@@ -98,21 +98,22 @@ struct rcu_domain::reader_tls {
 };
 
 struct rcu_domain::reclaim_tls {
-  tools::mailbox<clean_up_task> to_clean_up_;
+  tools::owner_stealer<std::vector<clean_up_task>> to_clean_up_;
 
   template <typename T, typename D>
   void retire(T* x, D d) {
-    to_clean_up_.push(
-        clean_up_task([x, d = std::move(d)]() mutable { d(x); }));
+    to_clean_up_.owner_access([&](std::vector<clean_up_task>& v) {
+      v.push_back(clean_up_task([x, d = std::move(d)]() mutable { d(x); }));
+    });
   }
 };
 
 struct rcu_domain::tls {
   reader_tls reader_;
-  std::shared_ptr<reclaim_tls> reclaimer_;
+  tools::shared_ptr<reclaim_tls> reclaimer_;
 
   tls(rcu_domain* domain) : reader_(domain) {
-    reclaimer_ = std::make_shared<reclaim_tls>();
+    reclaimer_ = tools::make_shared<reclaim_tls>();
     tools::lock_guard _{domain->reclaim_tls_vec_m};
     domain->reclaim_tls_vec.push_back(reclaimer_);
   }
@@ -154,31 +155,49 @@ inline void rcu_domain::synchronize() {
   tools::asymmetric_thread_fence_heavy();
 }
 
-// Collect from every mailbox once, skipping any that are currently locked.
+// Collect from every slot once, skipping any that are currently locked.
 inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_some_clean_up_tasks() {
   std::vector<clean_up_task> todo;
+  auto drain = [&](auto& os) {
+    os.try_stealer_access([&](auto& v) {
+      todo.insert(todo.end(), std::make_move_iterator(v.begin()),
+                  std::make_move_iterator(v.end()));
+      v.clear();
+    });
+  };
   tools::lock_guard _{reclaim_tls_vec_m};
-  for (auto& x : reclaim_tls_vec) x->to_clean_up_.try_get(todo);
+  for (auto& x : reclaim_tls_vec) drain(x->to_clean_up_);
   return todo;
 }
 
-// Collect from every mailbox, retrying any that were temporarily locked.
+// Collect from every slot, retrying any that were temporarily locked.
 // Also evicts dead reclaim_tls entries (use_count == 1 means owning tls destroyed).
 inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_all_clean_up_tasks() {
   std::vector<clean_up_task> todo;
+  auto drain = [&](auto& os) {
+    return os.try_stealer_access([&](auto& v) {
+      todo.insert(todo.end(), std::make_move_iterator(v.begin()),
+                  std::make_move_iterator(v.end()));
+      v.clear();
+    });
+  };
   tools::lock_guard _{reclaim_tls_vec_m};
-  std::vector<std::weak_ptr<reclaim_tls>> busy;
+  std::vector<reclaim_tls*> busy;
   std::erase_if(reclaim_tls_vec, [&](const auto& x) {
-    bool drained = x->to_clean_up_.try_get(todo);
-    if (!drained) busy.emplace_back(x);
-    return drained && x.use_count() == 1;
+    bool dead = x.use_count() == 1;
+    bool drained = drain(x->to_clean_up_);
+    if (!drained) {
+      busy.emplace_back(x.get());
+      return false;
+    }
+    return dead;
   });
   while (!busy.empty()) {
     tools::this_thread_yield();
-    std::erase_if(busy, [&todo](const auto& w) {
-      return w.lock()->to_clean_up_.try_get(todo);
+    std::erase_if(busy, [&](reclaim_tls* x) {
+      return drain(x->to_clean_up_);
     });
   }
   return todo;
