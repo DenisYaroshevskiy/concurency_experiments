@@ -1,18 +1,7 @@
-/*
- * Copyright 2025 Denis Yaroshevskiy
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2025 Denis Yaroshevskiy
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
+
 
 #pragma once
 
@@ -30,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <thread>
+#include <utility>
 #endif
 
 namespace tools {
@@ -77,6 +67,25 @@ class shared_mutex : rl::generic_mutex<std_shared_mutex>, rl::nocopy<> {
   }
 };
 
+template<typename T>
+struct var {
+  T value_{};
+  mutable rl::var<int> sentinel_{0};
+
+  var() = default;
+  var(T val) : value_(std::move(val)) {}
+
+  const T& read(rl::debug_info_param info DEFAULTED_DEBUG_INFO) const {
+    (void)(int)sentinel_(info);
+    return value_;
+  }
+
+  T& write(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    ++sentinel_(info);
+    return value_;
+  }
+};
+
 using rl::lock_guard;
 
 void asymmetric_thread_fence_light(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
@@ -102,6 +111,17 @@ inline constexpr auto memory_order_acquire = std::memory_order::acquire;
 inline constexpr auto memory_order_release = std::memory_order::release;
 inline constexpr auto memory_order_acq_rel = std::memory_order::acq_rel;
 inline constexpr auto memory_order_seq_cst = std::memory_order::seq_cst;
+
+template<typename T>
+struct var {
+  T value_{};
+
+  var() = default;
+  var(T val) : value_(std::move(val)) {}
+
+  const T& read() const { return value_; }
+  T& write() { return value_; }
+};
 
 // TODO: production periodic_runner
 
