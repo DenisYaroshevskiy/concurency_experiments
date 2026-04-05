@@ -184,16 +184,16 @@ rcu_domain::collect_all_clean_up_tasks() {
     });
   };
   tools::lock_guard _{reclaim_tls_vec_m};
-  std::vector<std::weak_ptr<reclaim_tls>> busy;
+  std::vector<reclaim_tls*> busy;
   std::erase_if(reclaim_tls_vec, [&](const auto& x) {
     bool drained = drain(x->to_clean_up_);
-    if (!drained) busy.emplace_back(x);
+    if (!drained) busy.emplace_back(x.get());
     return drained && x.use_count() == 1;
   });
   while (!busy.empty()) {
     tools::this_thread_yield();
-    std::erase_if(busy, [&](const auto& w) {
-      return drain(w.lock()->to_clean_up_);
+    std::erase_if(busy, [&](reclaim_tls* x) {
+      return drain(x->to_clean_up_);
     });
   }
   return todo;
