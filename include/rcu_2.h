@@ -41,7 +41,7 @@ struct rcu_domain {
   std::vector<reader_tls*> reader_tls_vec;
 
   tools::mutex reclaim_tls_vec_m;
-  std::vector<std::shared_ptr<reclaim_tls>> reclaim_tls_vec;
+  std::vector<tools::shared_ptr<reclaim_tls>> reclaim_tls_vec;
 
   rl::atomic<counter_t> generation = 1;
 
@@ -110,10 +110,10 @@ struct rcu_domain::reclaim_tls {
 
 struct rcu_domain::tls {
   reader_tls reader_;
-  std::shared_ptr<reclaim_tls> reclaimer_;
+  tools::shared_ptr<reclaim_tls> reclaimer_;
 
   tls(rcu_domain* domain) : reader_(domain) {
-    reclaimer_ = std::make_shared<reclaim_tls>();
+    reclaimer_ = tools::make_shared<reclaim_tls>();
     tools::lock_guard _{domain->reclaim_tls_vec_m};
     domain->reclaim_tls_vec.push_back(reclaimer_);
   }
