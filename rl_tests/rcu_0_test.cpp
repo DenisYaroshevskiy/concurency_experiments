@@ -5,7 +5,7 @@
 
 #include "relacy/context.hpp"
 #include "relacy/thread_local.hpp"
-#define RL_TEST
+#define TOOLS_RL_TEST
 #include "rcu_0.h"
 
 #include "rcu_rl_tests.h"

@@ -3,7 +3,7 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 
 
-#define RL_TEST
+#define TOOLS_RL_TEST
 #include "atrocious_mutex.h"
 
 #include <relacy/relacy.hpp>

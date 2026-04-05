@@ -5,7 +5,7 @@
 
 #pragma once
 
-#ifdef RL_TEST
+#ifdef TOOLS_RL_TEST
 #include <relacy/atomic.hpp>
 #include <relacy/atomic_fence.hpp>
 #include <relacy/backoff.hpp>
@@ -25,7 +25,7 @@
 
 namespace tools {
 
-#ifdef RL_TEST
+#ifdef TOOLS_RL_TEST
 template <typename T>
 using atomic = rl::atomic<T>;
 

@@ -4,7 +4,7 @@
 
 #include "relacy/context.hpp"
 #include "relacy/thread_local.hpp"
-#define RL_TEST
+#define TOOLS_RL_TEST
 #include "owner_stealer.h"
 
 #include <relacy/relacy.hpp>
