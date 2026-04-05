@@ -96,6 +96,10 @@ void asymmetric_thread_fence_heavy(rl::debug_info_param info DEFAULTED_DEBUG_INF
   rl::atomic_thread_fence(memory_order_seq_cst, info);
 }
 
+void thread_fence_seq_cst(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+  rl::atomic_thread_fence(memory_order_seq_cst, info);
+}
+
 #else
 
 template <typename T>
@@ -105,6 +109,8 @@ template <typename... Ts>
 using lock_guard = std::lock_guard<Ts...>;
 
 void this_thread_yield() { std::this_thread::yield(); }
+
+void thread_fence_seq_cst() { std::atomic_thread_fence(std::memory_order_seq_cst); }
 
 inline constexpr auto memory_order_relaxed = std::memory_order::relaxed;
 inline constexpr auto memory_order_acquire = std::memory_order::acquire;
