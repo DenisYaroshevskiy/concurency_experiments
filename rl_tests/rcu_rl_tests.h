@@ -282,19 +282,19 @@ template <typename Domain>
 struct rcu_test_retire_then_tls_death
     : rcu_test_base<rcu_test_retire_then_tls_death, Domain, 2> {
   rl::atomic<int> deleted{0};
-  rl::atomic<int> some_waits;
+  rl::atomic<int> some_waits{0};
 
   void thread_(unsigned idx) {
     if (idx == 0) {
       auto tls = this->make_tls();
-      this->retire(tls, &deleted, [](rl::atomic<int>* p) {
+      this->retire(tls, &deleted, [this](rl::atomic<int>* p) {
         p->store(1, rl::memory_order_relaxed);
-        some_waits.store(1, std::memory_order_relaxed);
+        some_waits.store(1, rl::memory_order_relaxed);
       });
-      some_waits.store(1, std::memory_order_relaxed);
+      some_waits.store(1, rl::memory_order_relaxed);
     } else {
       this->barrier();
-      some_waits.store(1, std::memory_order_relaxed);
+      some_waits.store(1, rl::memory_order_relaxed);
     }
   }
 

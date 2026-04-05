@@ -14,6 +14,7 @@
 #include <relacy/var.hpp>
 #include <functional>
 #include <memory>
+#include "shared_ptr.h"
 #else
 #include <atomic>
 #include <functional>
@@ -100,6 +101,12 @@ void thread_fence_seq_cst(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
   rl::atomic_thread_fence(memory_order_seq_cst, info);
 }
 
+template <typename T>
+using shared_ptr = rl_extra::shared_ptr<T>;
+
+template <typename T>
+shared_ptr<T> make_shared() { return rl_extra::make_shared<T>(); }
+
 #else
 
 template <typename T>
@@ -128,6 +135,12 @@ struct var {
   const T& read() const { return value_; }
   T& write() { return value_; }
 };
+
+template <typename T>
+using shared_ptr = std::shared_ptr<T>;
+
+template <typename T>
+shared_ptr<T> make_shared() { return std::make_shared<T>(); }
 
 // TODO: production periodic_runner
 
