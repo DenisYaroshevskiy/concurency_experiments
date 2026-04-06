@@ -21,6 +21,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <utility>
 #endif
@@ -113,6 +114,8 @@ shared_ptr<T> make_shared() { return rl_extra::make_shared<T>(); }
 
 template <typename T>
 using atomic = std::atomic<T>;
+
+using mutex = std::mutex;
 
 template <typename... Ts>
 using lock_guard = std::lock_guard<Ts...>;
