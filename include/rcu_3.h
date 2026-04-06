@@ -7,9 +7,9 @@
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <rcu_reading_subsystem.h>
 #include <rcu_tls_reclaimer.h>
 
-#include <algorithm>
 #include <functional>
 #include <memory>
 
@@ -41,7 +41,7 @@
 namespace v3 {
 
 struct rcu_domain {
-  using counter_t = std::uint64_t;
+  using counter_t = tools::rcu_reading_subsystem::counter_t;
   using clean_up_task = std::move_only_function<void()>;
 
   struct config {
@@ -49,7 +49,6 @@ struct rcu_domain {
     counter_t stale_gen_threshold = 10;
   };
 
-  struct reader_tls;
   struct reclaim_tls;
   struct tls;
 
@@ -60,52 +59,17 @@ struct rcu_domain {
 
   config config_;
 
-  tools::mutex reader_tls_vec_m;
-  std::vector<reader_tls*> reader_tls_vec;
+  tools::rcu_reading_subsystem reading;
 
   tools::mutex reclaim_tls_vec_m;
   std::vector<tools::shared_ptr<reclaim_tls>> reclaim_tls_vec;
 
-  tools::atomic<counter_t> generation{1};
   tools::atomic<counter_t> last_stale_gen{0};
 
-  void synchronize();
+  void synchronize() { reading.synchronize(); }
   void collect_stale_tasks(std::vector<clean_up_task>& out, counter_t current_gen);
   void garbage_collect();
   void barrier();
-};
-
-struct rcu_domain::reader_tls {
-  tools::atomic<counter_t> counter{0};
-  rcu_domain* domain_;
-
-  explicit reader_tls(rcu_domain* domain) : domain_(domain) {
-    tools::lock_guard _{domain_->reader_tls_vec_m};
-    domain_->reader_tls_vec.push_back(this);
-  }
-
-  reader_tls(const reader_tls&) = delete;
-  reader_tls(reader_tls&&) = delete;
-  reader_tls& operator=(const reader_tls&) = delete;
-  reader_tls& operator=(reader_tls&&) = delete;
-
-  ~reader_tls() {
-    tools::lock_guard _{domain_->reader_tls_vec_m};
-    std::iter_swap(std::ranges::find(domain_->reader_tls_vec, this),
-                   std::prev(domain_->reader_tls_vec.end()));
-    domain_->reader_tls_vec.pop_back();
-  }
-
-  void enter() {
-    counter_t g = domain_->generation.load(tools::memory_order_relaxed);
-    counter.store(g, tools::memory_order_relaxed);
-    tools::asymmetric_thread_fence_light();
-  }
-
-  void exit() {
-    tools::asymmetric_thread_fence_light();
-    counter.store(0, tools::memory_order_relaxed);
-  }
 };
 
 struct rcu_domain::reclaim_tls {
@@ -135,10 +99,11 @@ struct rcu_domain::reclaim_tls {
 };
 
 struct rcu_domain::tls {
-  reader_tls reader_;
+  tools::rcu_reading_subsystem::tls reader_;
   tools::shared_ptr<reclaim_tls> reclaimer_;
+  rcu_domain* domain_;
 
-  explicit tls(rcu_domain* domain) : reader_(domain) {
+  explicit tls(rcu_domain* domain) : reader_(domain->reading), domain_(domain) {
     reclaimer_ = tools::make_shared<reclaim_tls>();
     tools::lock_guard _{domain->reclaim_tls_vec_m};
     domain->reclaim_tls_vec.push_back(reclaimer_);
@@ -155,35 +120,13 @@ struct rcu_domain::tls {
 
   template <typename T, typename D = std::default_delete<T>>
   void retire(T* x, D d = {}) {
-    rcu_domain* domain = reader_.domain_;
-    counter_t gen = domain->generation.load(tools::memory_order_relaxed);
+    counter_t gen = domain_->reading.generation();
     auto cnt = reclaimer_->retire(gen, x, std::move(d));
-    if (cnt >= domain->config_.retire_threshold) {
-      domain->garbage_collect();
+    if (cnt >= domain_->config_.retire_threshold) {
+      domain_->garbage_collect();
     }
   }
 };
-
-inline void rcu_domain::synchronize() {
-  tools::asymmetric_thread_fence_heavy();
-
-  tools::lock_guard _{reader_tls_vec_m};
-
-  counter_t desired = generation.load(tools::memory_order_relaxed) + 1;
-  generation.store(desired, tools::memory_order_relaxed);
-
-  while (true) {
-    bool wait_more =
-        std::ranges::any_of(reader_tls_vec, [desired](const reader_tls* x) {
-          counter_t c = x->counter.load(tools::memory_order_relaxed);
-          return 0 < c && c < desired;
-        });
-
-    if (!wait_more) break;
-    tools::this_thread_yield();
-  }
-  tools::asymmetric_thread_fence_heavy();
-}
 
 inline void rcu_domain::collect_stale_tasks(std::vector<clean_up_task>& out,
                                             counter_t current_gen) {
@@ -197,7 +140,7 @@ inline void rcu_domain::collect_stale_tasks(std::vector<clean_up_task>& out,
 }
 
 inline void rcu_domain::garbage_collect() {
-  counter_t current_gen = generation.load(tools::memory_order_relaxed);
+  counter_t current_gen = reading.generation();
 
   std::vector<clean_up_task> stale_tasks;
   counter_t last_stale = last_stale_gen.load(tools::memory_order_relaxed);

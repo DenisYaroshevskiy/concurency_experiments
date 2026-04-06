@@ -6,8 +6,8 @@
 
 #include <atomic_wrappers.h>
 #include <owner_stealer.h>
+#include <rcu_reading_subsystem.h>
 
-#include <algorithm>
 #include <functional>
 #include <memory>
 
@@ -25,10 +25,8 @@
 namespace v2 {
 
 struct rcu_domain {
-  using counter_t = std::uint64_t;
   using clean_up_task = std::move_only_function<void()>;
 
-  struct reader_tls;
   struct reclaim_tls;
   struct tls;
 
@@ -36,15 +34,12 @@ struct rcu_domain {
 
   ~rcu_domain() { barrier(); }
 
-  tools::mutex reader_tls_vec_m;
-  std::vector<reader_tls*> reader_tls_vec;
+  tools::rcu_reading_subsystem reading;
 
   tools::mutex reclaim_tls_vec_m;
   std::vector<tools::shared_ptr<reclaim_tls>> reclaim_tls_vec;
 
-  rl::atomic<counter_t> generation = 1;
-
-  void synchronize();
+  void synchronize() { reading.synchronize(); }
 
   std::vector<clean_up_task> collect_some_clean_up_tasks();
   std::vector<clean_up_task> collect_all_clean_up_tasks();
@@ -62,40 +57,6 @@ struct rcu_domain {
   }
 };
 
-struct rcu_domain::reader_tls {
-  tools::atomic<counter_t> counter;
-  rcu_domain* domain_;
-
-  reader_tls(rcu_domain* domain) : domain_(domain) {
-    tools::lock_guard _{domain_->reader_tls_vec_m};
-    domain_->reader_tls_vec.push_back(this);
-  }
-
-  reader_tls(const reader_tls&) = delete;
-  reader_tls(reader_tls&&) = delete;
-  reader_tls& operator=(const reader_tls&) = delete;
-  reader_tls& operator=(reader_tls&&) = delete;
-
-  ~reader_tls() {
-    tools::lock_guard _{domain_->reader_tls_vec_m};
-    std::iter_swap(std::ranges::find(domain_->reader_tls_vec, this),
-                   std::prev(domain_->reader_tls_vec.end()));
-    domain_->reader_tls_vec.pop_back();
-  }
-
-  void enter() {
-    counter_t loaded_generation =
-        domain_->generation.load(tools::memory_order_relaxed);
-    counter.store(loaded_generation, tools::memory_order_relaxed);
-    tools::asymmetric_thread_fence_light();
-  }
-
-  void exit() {
-    tools::asymmetric_thread_fence_light();
-    counter.store(0, tools::memory_order_relaxed);
-  }
-};
-
 struct rcu_domain::reclaim_tls {
   tools::owner_stealer<std::vector<clean_up_task>> to_clean_up_;
 
@@ -108,10 +69,10 @@ struct rcu_domain::reclaim_tls {
 };
 
 struct rcu_domain::tls {
-  reader_tls reader_;
+  tools::rcu_reading_subsystem::tls reader_;
   tools::shared_ptr<reclaim_tls> reclaimer_;
 
-  tls(rcu_domain* domain) : reader_(domain) {
+  tls(rcu_domain* domain) : reader_(domain->reading) {
     reclaimer_ = tools::make_shared<reclaim_tls>();
     tools::lock_guard _{domain->reclaim_tls_vec_m};
     domain->reclaim_tls_vec.push_back(reclaimer_);
@@ -131,30 +92,6 @@ struct rcu_domain::tls {
     reclaimer_->retire(x, d);
   }
 };
-
-inline void rcu_domain::synchronize() {
-  tools::asymmetric_thread_fence_heavy();
-
-  tools::lock_guard _{reader_tls_vec_m};
-
-  counter_t desired = generation.load(tools::memory_order_relaxed) + 1;
-  generation.store(desired, tools::memory_order_relaxed);
-
-  while (true) {
-    bool wait_more =
-        std::ranges::any_of(reader_tls_vec, [desired](const reader_tls* x) {
-          counter_t tls_counter = x->counter.load(tools::memory_order_relaxed);
-          return 0 < tls_counter && tls_counter < desired;
-        });
-
-    if (!wait_more) {
-      break;
-    }
-
-    tools::this_thread_yield();
-  }
-  tools::asymmetric_thread_fence_heavy();
-}
 
 // Collect from every slot once, skipping any that are currently locked.
 inline std::vector<rcu_domain::clean_up_task>
