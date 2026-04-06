@@ -18,17 +18,16 @@
  * executes the tasks.
  * barrier() drains all mailboxes, synchronizes, and executes.
  *
- * reader_tls and reclaim_tls are independent:
- *   - reader_tls is stored directly (raw pointer) in reader_tls_vec.
- *   - reclaim_tls is stored via shared_ptr in reclaim_tls_vec.
+ * reader_tls and reclaim_tls are independent.
+ * Most threads only need reader_tls.
  */
 namespace v2 {
 
 struct rcu_domain {
   using clean_up_task = std::move_only_function<void()>;
 
+  using reader_tls = tools::rcu_reading_subsystem::tls;
   struct reclaim_tls;
-  struct tls;
 
   struct obj_base {};
 
@@ -36,10 +35,8 @@ struct rcu_domain {
 
   tools::rcu_reading_subsystem reading;
 
-  tools::mutex reclaim_tls_vec_m;
-  std::vector<tools::shared_ptr<reclaim_tls>> reclaim_tls_vec;
-
   void synchronize() { reading.synchronize(); }
+  reclaim_tls make_reclaim_tls();
 
   std::vector<clean_up_task> collect_some_clean_up_tasks();
   std::vector<clean_up_task> collect_all_clean_up_tasks();
@@ -55,43 +52,43 @@ struct rcu_domain {
     synchronize();
     for (auto& t : tasks) t();
   }
+
+ private:
+  struct reclaim_mailbox;
+
+  tools::mutex reclaim_tls_vec_m;
+  std::vector<tools::shared_ptr<reclaim_mailbox>> reclaim_mailbox_vec;
+};
+
+struct rcu_domain::reclaim_mailbox {
+  tools::owner_stealer<std::vector<clean_up_task>> to_clean_up_;
 };
 
 struct rcu_domain::reclaim_tls {
-  tools::owner_stealer<std::vector<clean_up_task>> to_clean_up_;
+  tools::shared_ptr<reclaim_mailbox> mailbox_;
 
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    to_clean_up_.owner_access([&](std::vector<clean_up_task>& v) {
+  reclaim_tls() = default;
+  reclaim_tls(const reclaim_tls&) = delete;
+  reclaim_tls(reclaim_tls&&) = default;
+  reclaim_tls& operator=(const reclaim_tls&) = delete;
+  reclaim_tls& operator=(reclaim_tls&&) = default;
+  ~reclaim_tls() = default;
+
+  template <typename T, typename D = std::default_delete<T>>
+  void retire(T* x, D d = {}) {
+    mailbox_->to_clean_up_.owner_access([&](std::vector<clean_up_task>& v) {
       v.push_back(clean_up_task([x, d = std::move(d)]() mutable { d(x); }));
     });
   }
 };
 
-struct rcu_domain::tls {
-  tools::rcu_reading_subsystem::tls reader_;
-  tools::shared_ptr<reclaim_tls> reclaimer_;
-
-  tls(rcu_domain* domain) : reader_(domain->reading) {
-    reclaimer_ = tools::make_shared<reclaim_tls>();
-    tools::lock_guard _{domain->reclaim_tls_vec_m};
-    domain->reclaim_tls_vec.push_back(reclaimer_);
-  }
-
-  tls(const tls&) = delete;
-  tls(tls&&) = delete;
-  tls& operator=(const tls&) = delete;
-  tls& operator=(tls&&) = delete;
-  ~tls() = default;
-
-  void enter() { reader_.enter(); }
-  void exit() { reader_.exit(); }
-
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    reclaimer_->retire(x, d);
-  }
-};
+inline rcu_domain::reclaim_tls rcu_domain::make_reclaim_tls() {
+  reclaim_tls r;
+  r.mailbox_ = tools::make_shared<reclaim_mailbox>();
+  tools::lock_guard _{reclaim_tls_vec_m};
+  reclaim_mailbox_vec.push_back(r.mailbox_);
+  return r;
+}
 
 // Collect from every slot once, skipping any that are currently locked.
 inline std::vector<rcu_domain::clean_up_task>
@@ -105,13 +102,13 @@ rcu_domain::collect_some_clean_up_tasks() {
     });
   };
   tools::lock_guard _{reclaim_tls_vec_m};
-  for (auto& x : reclaim_tls_vec) drain(x->to_clean_up_);
+  for (auto& x : reclaim_mailbox_vec) drain(x->to_clean_up_);
   return todo;
 }
 
 // Collect from every slot, retrying any that were temporarily locked.
-// Also evicts dead reclaim_tls entries (use_count == 1 means owning tls
-// destroyed).
+// Also evicts dead reclaim_mailbox entries (use_count == 1 means owning
+// reclaim_tls destroyed).
 inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_all_clean_up_tasks() {
   std::vector<clean_up_task> todo;
@@ -122,8 +119,8 @@ rcu_domain::collect_all_clean_up_tasks() {
   };
 
   tools::lock_guard _{reclaim_tls_vec_m};
-  std::vector<reclaim_tls*> busy;
-  std::erase_if(reclaim_tls_vec, [&](const auto& x) {
+  std::vector<reclaim_mailbox*> busy;
+  std::erase_if(reclaim_mailbox_vec, [&](const auto& x) {
     bool dead = x.use_count() == 1;
     if (!x->to_clean_up_.try_stealer_access(move_tasks)) {
       busy.emplace_back(x.get());
