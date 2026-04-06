@@ -302,6 +302,29 @@ struct rcu_test_retire_then_tls_death
   }
 };
 
+// Thread 0 retires one task and stops. Thread 1 retires several tasks,
+// potentially triggering reclamation that collects thread 0's stale task.
+template <typename Domain>
+struct rcu_test_cross_thread_reclaim
+    : rcu_test_base<rcu_test_cross_thread_reclaim, Domain, 2> {
+  rl::atomic<int> deleted{0};
+
+  void thread_(unsigned idx) {
+    auto tls = this->make_tls();
+    int n = (idx == 0) ? 1 : 4;
+    for (int i = 0; i < n; ++i) {
+      this->retire(tls, &deleted, [](rl::atomic<int>* p) {
+        p->fetch_add(1, rl::memory_order_relaxed);
+      });
+    }
+  }
+
+  void after() {
+    this->barrier();
+    RL_ASSERT(deleted.load(rl::memory_order_relaxed) == 5);
+  }
+};
+
 template <typename Domain>
 void simulate() {
   rl::simulate<rcu_test_no_mutation<Domain>>();
@@ -312,6 +335,7 @@ void simulate() {
   rl::simulate<rcu_test_retire<Domain>>();
   rl::simulate<rcu_test_barrier_concurrent<Domain>>();
   rl::simulate<rcu_test_retire_then_tls_death<Domain>>();
+  rl::simulate<rcu_test_cross_thread_reclaim<Domain>>();
 }
 
 #endif  // RCU_RL_TESTS_H
