@@ -1,210 +1,120 @@
+// clang-format off
 // Copyright 2026 Denis Yaroshevskiy
 // Distributed under the Boost Software License, Version 1.0.
 // (See accompanying file LICENSE.md or copy at
 // https://www.boost.org/LICENSE_1_0.txt)
+// clang-format on
 
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <owner_stealer.h>
 
-#include <algorithm>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <vector>
 
+namespace tools {
+
 /*
- * Per-thread task reclaimer for RCU.
+ * rcu tls collection of tasks to reclaim.
  *
- * On retire, instead of synchronizing immediately, each thread pushes tasks
- * into its own reclaimer. When the accumulation exceeds a threshold, the
- * caller triggers rcu_synchronize and then calls propagate() on all reclaimers.
+ * Owner adds tasks to the list, using owner_reclaim.
+ * He also passes the current generation of the rcu. Anything that is 2 or more
+ * generations ago gets executed (generation is increasing in the beginning of a
+ * sync by 1).
  *
- * Each reclaimer has a 3-stage pipeline:
+ * owner_reclaim returns the number of the unreclaimed tasks. If it's too much,
+ * the user might trigger sync / and call clean_ready_tasks (part of
+ * owner_reclaim).
  *
- *   waiting_for_sync  — tasks added since the last synchronize began.
- *   syncing           — tasks that were in waiting_for_sync when the last
- *                       synchronize started; they become ready once it
- * completes. ready             — tasks that have passed a full synchronize
- * cycle and may safely be executed by the owning thread.
+ * Once some number of generations, we will try to clean the stale tasks
+ * (a thread called reclaim a few times but never cleared).
+ * That uses `oldest_unreclaimed` to check if the thread didn't clean up for a
+ * while and try_steal_tasks to get the tasks.
  *
- * Stage advancement is done by calling propagate() after each synchronize.
- * It atomically moves: syncing → ready, waiting_for_sync → syncing.
+ * rcu_barrier sometimes uses steal_tasks_blocking.
  *
- * The owning thread executes ready tasks during the next push(), preserving
- * allocator locality. If the owning thread is inactive for too long,
- * propagate() returns an old time_proxy for the oldest ready task, allowing
- * another thread to call try_steal_ready() to take over execution.
- *
- * For barrier operations, get_all_tasks() collects every task regardless of
- * stage. It is non-blocking per slot: a null slot (temporarily held by a
- * concurrent push) is treated as empty, so callers should ensure no pushes
- * are in flight when a hard guarantee is required.
+ * try_steal_tasks and steal_tasks_blocking don't care for generation, since
+ * they are doing a sync anyways.
  */
-struct rcu_tls_reclaimer {
+
+class rcu_tls_reclaimer {
+ public:
+  using counter_t = std::uint64_t;
   using task = std::move_only_function<void()>;
-  using time_proxy = std::size_t;
 
-  rcu_tls_reclaimer();
-  ~rcu_tls_reclaimer();
-  rcu_tls_reclaimer(const rcu_tls_reclaimer&) = delete;
-  rcu_tls_reclaimer(rcu_tls_reclaimer&&) = delete;
+  std::size_t owner_reclaim(counter_t current_gen, task t);
+  std::size_t clean_ready_tasks(counter_t current_gen);
 
-  // Called by the owning thread on retire.
-  // Adds the task to waiting_for_sync, recording tp as its submission time.
-  // Drains and executes any tasks that are already ready, on the calling
-  // thread (preserving allocator locality).
-  // Returns the count of tasks now in waiting_for_sync; once this exceeds
-  // the caller's threshold, the caller should trigger rcu_synchronize and
-  // then call propagate() on all reclaimers.
-  std::size_t push(task t, time_proxy tp);
+  std::optional<counter_t> oldest_unreclaimed() const;
 
-  // Called by another thread after rcu_synchronize() completes.
-  // Advances the pipeline: syncing → ready, waiting_for_sync → syncing.
-  // Returns the time_proxy of the oldest task now in ready so the caller
-  // can decide whether to steal if the owning thread seems inactive.
-  time_proxy propagate();
-
-  // Called by another thread when it thinks current thread took too long.
-  // Non-blocking. Takes the ready tasks if the slot is immediately available;
-  // returns an empty vector if the slot is currently locked.
-  std::vector<task> try_steal_ready();
-
-  // Called by a barrier thread.
-  // Returns every task from all stages. Non-blocking per slot: a slot
-  // temporarily held by a concurrent push is treated as empty.
-  std::vector<task> get_all_tasks();
+  bool try_steal_tasks(std::vector<task>& here);
+  void steal_tasks_blocking(std::vector<task>& here);
 
  private:
-  struct stage_data {
-    std::vector<task> tasks;
-    time_proxy oldest_task = std::numeric_limits<time_proxy>::max();
-  };
+  using task_entry = std::pair<counter_t, task>;
 
-  tools::atomic<tools::var<stage_data>*> waiting_for_sync_;
-  tools::atomic<tools::var<stage_data>*> syncing_;
-  tools::atomic<tools::var<stage_data>*> ready_;
-  tools::atomic<tools::var<stage_data>*> free_buffer_;
+  void do_clean(std::vector<task_entry>& v, counter_t current_gen);
+
+  static constexpr counter_t kNoTasks = std::numeric_limits<counter_t>::max();
+  tools::atomic<counter_t> oldest_unreclaimed_{kNoTasks};
+  tools::owner_stealer<std::vector<task_entry>> todo_list_;
 };
 
-inline rcu_tls_reclaimer::rcu_tls_reclaimer() {
-  // Only waiting_for_sync starts with an allocated batch; the other stages
-  // start null (nothing to sync or execute yet).
-  waiting_for_sync_.store(new tools::var<stage_data>{},
-                          tools::memory_order_relaxed);
-  syncing_.store(nullptr, tools::memory_order_relaxed);
-  ready_.store(nullptr, tools::memory_order_relaxed);
-  free_buffer_.store(nullptr, tools::memory_order_relaxed);
-}
-
-inline rcu_tls_reclaimer::~rcu_tls_reclaimer() {
-  delete waiting_for_sync_.load(tools::memory_order_relaxed);
-  delete syncing_.load(tools::memory_order_relaxed);
-  delete ready_.load(tools::memory_order_relaxed);
-  delete free_buffer_.load(tools::memory_order_relaxed);
-}
-
-inline std::size_t rcu_tls_reclaimer::push(task t, time_proxy tp) {
-  std::size_t res;
-
-  {
-    auto* cur =
-        waiting_for_sync_.exchange(nullptr, tools::memory_order_acquire);
-
-    auto& data = cur->write();
-    data.tasks.push_back(std::move(t));
-    if (data.tasks.size() == 1) data.oldest_task = tp;
-    res = data.tasks.size();
-
-    waiting_for_sync_.store(cur, tools::memory_order_release);
+inline void rcu_tls_reclaimer::do_clean(std::vector<task_entry>& v,
+                                        counter_t current_gen) {
+  auto it = v.begin();
+  while (it != v.end() && it->first + 2 <= current_gen) {
+    it->second();
+    ++it;
   }
-
-  {
-    auto* r = ready_.exchange(nullptr, tools::memory_order_acquire);
-    if (!r) return res;
-
-    for (auto& ready_task : r->write().tasks) ready_task();
-    r->write() = stage_data{};
-    delete free_buffer_.exchange(r, tools::memory_order_release);
-  }
-
-  return res;
+  v.erase(v.begin(), it);
+  oldest_unreclaimed_.store(v.empty() ? kNoTasks : v.front().first,
+                            tools::memory_order_relaxed);
 }
 
-inline rcu_tls_reclaimer::time_proxy rcu_tls_reclaimer::propagate() {
-  tools::var<stage_data>* new_syncing =
-      waiting_for_sync_.load(tools::memory_order_relaxed);
-  if (new_syncing != nullptr) {
-    auto* fresh = free_buffer_.exchange(nullptr, tools::memory_order_acquire);
-    if (!fresh) fresh = new tools::var<stage_data>{};
-    if (!waiting_for_sync_.compare_exchange_strong(
-            new_syncing, fresh, tools::memory_order_acq_rel,
-            tools::memory_order_relaxed)) {
-      delete fresh;
-    }
-  }
-  auto* new_ready = syncing_.exchange(new_syncing, tools::memory_order_acq_rel);
-
-  if (!new_ready) {
-    auto* cur_ready = ready_.exchange(nullptr, tools::memory_order_acquire);
-    if (!cur_ready) return std::numeric_limits<time_proxy>::max();
-    time_proxy res = cur_ready->read().oldest_task;
-    ready_.store(cur_ready, tools::memory_order_release);
-    return res;
-  }
-
-  auto* cur_ready = ready_.exchange(nullptr, tools::memory_order_acquire);
-  if (!cur_ready) {
-    cur_ready = new_ready;
-  } else {
-    auto& dst = cur_ready->write();
-    auto& src = new_ready->write();
-    dst.tasks.insert(dst.tasks.end(),
-                     std::make_move_iterator(src.tasks.begin()),
-                     std::make_move_iterator(src.tasks.end()));
-    dst.oldest_task = std::min(dst.oldest_task, src.oldest_task);
-    delete new_ready;
-  }
-
-  time_proxy res = cur_ready->read().oldest_task;
-  ready_.store(cur_ready, tools::memory_order_release);
-  return res;
+inline std::size_t rcu_tls_reclaimer::owner_reclaim(counter_t current_gen,
+                                                     task t) {
+  std::size_t remaining = 0;
+  todo_list_.owner_access([&](auto& v) {
+    v.push_back({current_gen, std::move(t)});
+    do_clean(v, current_gen);
+    remaining = v.size();
+  });
+  return remaining;
 }
 
-inline std::vector<rcu_tls_reclaimer::task>
-rcu_tls_reclaimer::try_steal_ready() {
-  auto* r = ready_.exchange(nullptr, tools::memory_order_acquire);
-  if (!r) return {};
-
-  auto tasks = std::move(r->write().tasks);
-  r->write() = stage_data{};
-  delete free_buffer_.exchange(r, tools::memory_order_release);
-  return tasks;
+inline std::size_t rcu_tls_reclaimer::clean_ready_tasks(
+    counter_t current_gen) {
+  std::size_t remaining = 0;
+  todo_list_.owner_access([&](auto& v) {
+    do_clean(v, current_gen);
+    remaining = v.size();
+  });
+  return remaining;
 }
 
-inline std::vector<rcu_tls_reclaimer::task> rcu_tls_reclaimer::get_all_tasks() {
-  std::vector<task> all;
-
-  auto drain_fresh = [&all](tools::atomic<tools::var<stage_data>*>& a) {
-    tools::var<stage_data>* s = a.load(tools::memory_order_relaxed);
-    if (!s) return;
-    auto* fresh = new tools::var<stage_data>{};
-    if (!a.compare_exchange_strong(s, fresh, tools::memory_order_acq_rel,
-                                   tools::memory_order_relaxed)) {
-      delete fresh;
-      return;
-    }
-    for (auto& t : s->write().tasks) all.push_back(std::move(t));
-    delete s;
-  };
-  auto drain = [&all](tools::atomic<tools::var<stage_data>*>& a) {
-    auto* s = a.exchange(nullptr, tools::memory_order_acquire);
-    if (!s) return;
-    for (auto& t : s->write().tasks) all.push_back(std::move(t));
-    delete s;
-  };
-
-  drain_fresh(waiting_for_sync_);
-  drain(syncing_);
-  drain(ready_);
-  return all;
+inline std::optional<rcu_tls_reclaimer::counter_t>
+rcu_tls_reclaimer::oldest_unreclaimed() const {
+  auto v = oldest_unreclaimed_.load(tools::memory_order_relaxed);
+  if (v == kNoTasks) return std::nullopt;
+  return v;
 }
+
+inline bool rcu_tls_reclaimer::try_steal_tasks(std::vector<task>& here) {
+  return todo_list_.try_stealer_access([&](auto& v) {
+    for (auto& [gen, t] : v) here.push_back(std::move(t));
+    v.clear();
+  });
+}
+
+inline void rcu_tls_reclaimer::steal_tasks_blocking(std::vector<task>& here) {
+  todo_list_.blocking_stealer_access([&](auto& v) {
+    for (auto& [gen, t] : v) here.push_back(std::move(t));
+    v.clear();
+  });
+}
+
+}  // namespace tools

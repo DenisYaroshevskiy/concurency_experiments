@@ -1,7 +1,8 @@
+// clang-format off
 // Copyright 2026 Denis Yaroshevskiy
 // Distributed under the Boost Software License, Version 1.0.
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
-
+// clang-format on
 
 #include <atomic_wrappers.h>
 #include <owner_stealer.h>
@@ -33,9 +34,7 @@ struct rcu_domain {
 
   struct obj_base {};
 
-  ~rcu_domain() {
-    barrier();
-  }
+  ~rcu_domain() { barrier(); }
 
   tools::mutex reader_tls_vec_m;
   std::vector<reader_tls*> reader_tls_vec;
@@ -128,7 +127,9 @@ struct rcu_domain::tls {
   void exit() { reader_.exit(); }
 
   template <typename T, typename D>
-  void retire(T* x, D d) { reclaimer_->retire(x, d); }
+  void retire(T* x, D d) {
+    reclaimer_->retire(x, d);
+  }
 };
 
 inline void rcu_domain::synchronize() {
@@ -140,8 +141,8 @@ inline void rcu_domain::synchronize() {
   generation.store(desired, tools::memory_order_relaxed);
 
   while (true) {
-    bool wait_more = std::ranges::any_of(
-        reader_tls_vec, [desired](const reader_tls* x) {
+    bool wait_more =
+        std::ranges::any_of(reader_tls_vec, [desired](const reader_tls* x) {
           counter_t tls_counter = x->counter.load(tools::memory_order_relaxed);
           return 0 < tls_counter && tls_counter < desired;
         });
@@ -172,34 +173,31 @@ rcu_domain::collect_some_clean_up_tasks() {
 }
 
 // Collect from every slot, retrying any that were temporarily locked.
-// Also evicts dead reclaim_tls entries (use_count == 1 means owning tls destroyed).
+// Also evicts dead reclaim_tls entries (use_count == 1 means owning tls
+// destroyed).
 inline std::vector<rcu_domain::clean_up_task>
 rcu_domain::collect_all_clean_up_tasks() {
   std::vector<clean_up_task> todo;
-  auto drain = [&](auto& os) {
-    return os.try_stealer_access([&](auto& v) {
-      todo.insert(todo.end(), std::make_move_iterator(v.begin()),
-                  std::make_move_iterator(v.end()));
-      v.clear();
-    });
+  auto move_tasks = [&](std::vector<clean_up_task>& v) {
+    todo.insert(todo.end(), std::make_move_iterator(v.begin()),
+                std::make_move_iterator(v.end()));
+    v.clear();
   };
+
   tools::lock_guard _{reclaim_tls_vec_m};
   std::vector<reclaim_tls*> busy;
   std::erase_if(reclaim_tls_vec, [&](const auto& x) {
     bool dead = x.use_count() == 1;
-    bool drained = drain(x->to_clean_up_);
-    if (!drained) {
+    if (!x->to_clean_up_.try_stealer_access(move_tasks)) {
       busy.emplace_back(x.get());
       return false;
     }
     return dead;
   });
-  while (!busy.empty()) {
-    tools::this_thread_yield();
-    std::erase_if(busy, [&](reclaim_tls* x) {
-      return drain(x->to_clean_up_);
-    });
+  for (auto& b : busy) {
+    b->to_clean_up_.blocking_stealer_access(move_tasks);
   }
+
   return todo;
 }
 

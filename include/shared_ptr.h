@@ -1,3 +1,4 @@
+// clang-format off
 // Copyright 2026 Denis Yaroshevskiy
 // Distributed under the Boost Software License, Version 1.0.
 // (See accompanying file LICENSE.md or copy at
