@@ -388,6 +388,4 @@ void full_test() {
   rl::simulate<rcu_test_nested_read<Domain>>();
 }
 
-
-
 #endif  // RCU_RL_TESTS_H

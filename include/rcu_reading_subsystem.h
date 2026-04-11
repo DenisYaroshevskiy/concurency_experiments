@@ -65,7 +65,8 @@ class rcu_reading_subsystem::tls : tools::nomove {
     tools::asymmetric_thread_fence_light();
   }
   void exit() {
-    counter_t unusual = not_standard_situtation.load(tools::memory_order_relaxed);
+    counter_t unusual =
+        not_standard_situtation.load(tools::memory_order_relaxed);
     if (unusual) [[unlikely]] {
       unusual_exit(unusual);
       return;
@@ -73,19 +74,77 @@ class rcu_reading_subsystem::tls : tools::nomove {
 
     tools::asymmetric_thread_fence_light();
     counter.store(0, tools::memory_order_relaxed);
+    tools::asymmetric_thread_fence_light();
+
+    counter_t waiting = not_standard_situtation.load(tools::memory_order_relaxed);
+    if (waiting) [[unlikely]] {
+      counter.notify_one();
+    }
   }
 
-  rcu_reading_subsystem& subsystem() const {
-    return *subsystem_;
+  // At most one waiter
+  void wait(counter_t desired) {
+    counter_t c = counter.load(tools::memory_order_relaxed);
+    if (0 == c || c >= desired) {
+      return;
+    }
+    set_waiting_bit();
+    tools::asymmetric_thread_fence_heavy();
+    counter.wait(c, tools::memory_order_relaxed);
+    clear_waiting_bit();
+
+    // it is possible that this wait always immediately returns
+    // but I find it not obvious to prove.
+    wait(desired);
   }
+
+  rcu_reading_subsystem& subsystem() const { return *subsystem_; }
 
  private:
   friend class rcu_reading_subsystem;
 
-  void unusual_exit(counter_t /*unusual*/) {
-    not_standard_situtation.fetch_sub(1, tools::memory_order_relaxed);
+  static_assert(sizeof(counter_t) == 8, "");
+  static constexpr counter_t waiting_bit = (counter_t)1 << 63;
+
+  void unusual_exit(counter_t unusual) {
+    bool is_shared = unusual & ~waiting_bit;
+    if (is_shared) {
+      not_standard_situtation.fetch_sub(1, tools::memory_order_relaxed);
+      return;
+    }
+
+    // If we are here - means the sync is waiting.
+
+    // exit the critical section.
+    {
+      tools::asymmetric_thread_fence_light();
+      counter.store(0, tools::memory_order_relaxed);
+      tools::asymmetric_thread_fence_light();
+    }
+
+    // are still waiting?
+    unusual = not_standard_situtation.load(tools::memory_order_relaxed);
+    if (!unusual) {
+      return;
+    }
+
+    clear_waiting_bit();
+    counter.notify_one();
   }
 
+  void set_waiting_bit() {
+    counter_t cur = not_standard_situtation.load(tools::memory_order_relaxed);
+    while (!not_standard_situtation.compare_exchange_weak(
+        cur, cur | waiting_bit, tools::memory_order_relaxed));
+  }
+
+  void clear_waiting_bit() {
+    counter_t cur = not_standard_situtation.load(tools::memory_order_relaxed);
+
+    // it's possible that we don't need the spin here.
+    while (!not_standard_situtation.compare_exchange_weak(
+        cur, cur & ~waiting_bit, tools::memory_order_relaxed));
+  }
 
   tools::atomic<counter_t> counter{0};
 
@@ -104,16 +163,19 @@ inline void rcu_reading_subsystem::synchronize() {
   counter_t desired = generation_.load(tools::memory_order_relaxed) + 1;
   generation_.store(desired, tools::memory_order_relaxed);
 
-  while (true) {
-    bool wait_more =
-        std::ranges::any_of(reader_tls_vec, [desired](const tls* x) {
-          counter_t c = x->counter.load(tools::memory_order_relaxed);
-          return 0 < c && c < desired;
-        });
+  std::vector<tls*> waiting;
+  waiting.reserve(reader_tls_vec.size());
+  std::copy_if(reader_tls_vec.begin(), reader_tls_vec.end(),
+               std::back_inserter(waiting),
+               [desired](const tls* x) {
+                 counter_t c = x->counter.load(tools::memory_order_relaxed);
+                 return 0 < c && c < desired;
+               });
 
-    if (!wait_more) break;
-    tools::this_thread_yield();
+  for (auto* tls : waiting) {
+    tls->wait(desired);
   }
+
   tools::asymmetric_thread_fence_heavy();
 }
 
