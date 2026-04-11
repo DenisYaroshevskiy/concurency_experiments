@@ -12,4 +12,4 @@
 
 #include "rcu_rl_tests.h"
 
-int main() { simulate<v1::rcu_domain>(); }
+int main() { full_test<v1::rcu_domain>(); }

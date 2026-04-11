@@ -54,10 +54,23 @@ class rcu_reading_subsystem::tls : tools::nomove {
 
   void enter() {
     counter_t g = subsystem_->generation_.load(tools::memory_order_relaxed);
+    counter_t cur = counter.load(tools::memory_order_relaxed);
+
+    if (cur) [[unlikely]] {
+      not_standard_situtation.fetch_add(1, tools::memory_order_relaxed);
+      return;
+    }
+
     counter.store(g, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_light();
   }
   void exit() {
+    counter_t unusual = not_standard_situtation.load(tools::memory_order_relaxed);
+    if (unusual) [[unlikely]] {
+      unusual_exit(unusual);
+      return;
+    }
+
     tools::asymmetric_thread_fence_light();
     counter.store(0, tools::memory_order_relaxed);
   }
@@ -69,7 +82,17 @@ class rcu_reading_subsystem::tls : tools::nomove {
  private:
   friend class rcu_reading_subsystem;
 
+  void unusual_exit(counter_t /*unusual*/) {
+    not_standard_situtation.fetch_sub(1, tools::memory_order_relaxed);
+  }
+
+
   tools::atomic<counter_t> counter{0};
+
+  // a counter that indicates something unsual is happening
+  // bits below the top one -
+  tools::atomic<counter_t> not_standard_situtation{0};
+
   rcu_reading_subsystem* subsystem_;
 };
 

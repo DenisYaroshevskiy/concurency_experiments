@@ -333,7 +333,7 @@ struct rcu_test_cross_thread_reclaim
 };
 
 template <typename Domain>
-void simulate() {
+void minimal_test() {
   rl::simulate<rcu_test_no_mutation<Domain>>();
   rl::simulate<rcu_test_access_and_sync<Domain>>();
   rl::simulate<rcu_test_min_sync<Domain>>();
@@ -344,5 +344,50 @@ void simulate() {
   rl::simulate<rcu_test_retire_then_tls_death<Domain>>();
   rl::simulate<rcu_test_cross_thread_reclaim<Domain>>();
 }
+
+template <typename Domain>
+struct rcu_test_nested_read : rcu_test_base<rcu_test_nested_read, Domain, 2> {
+  rl::atomic<const rl::var<int>*> config = 0;
+
+  void before() { config.store(new rl::var<int>(1), rl::memory_order_release); }
+
+  void thread_read() {
+    auto tls = this->make_reader_tls();
+    tls.enter();
+    const rl::var<int>* outer = config.load(rl::memory_order_acquire);
+    tls.enter();
+    const rl::var<int>* inner = config.load(rl::memory_order_acquire);
+    int val = (*inner)($);
+    tls.exit();
+    int val2 = (*outer)($);
+    tls.exit();
+    RL_ASSERT(val == 1 || val == 2);
+    RL_ASSERT(val2 == 1 || val2 == 2);
+  }
+
+  void thread_write() {
+    auto tls = this->make_reclaim_tls();
+    auto* upd = new rl::var<int>(2);
+    this->retire(tls, config.exchange(upd, rl::memory_order_acq_rel));
+  }
+
+  void thread_(unsigned idx) {
+    if (idx != 0) thread_read();
+    else thread_write();
+  }
+
+  void after() {
+    this->barrier();
+    delete config.load(rl::memory_order_acquire);
+  }
+};
+
+template <typename Domain>
+void full_test() {
+  minimal_test<Domain>();
+  rl::simulate<rcu_test_nested_read<Domain>>();
+}
+
+
 
 #endif  // RCU_RL_TESTS_H
