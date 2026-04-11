@@ -6,6 +6,7 @@
 
 
 #include <atomic_wrappers.h>
+#include <utils.h>
 
 #include <algorithm>
 #include <memory>
@@ -22,6 +23,8 @@ struct rcu_domain {
   using counter_t = std::uint64_t;
 
   struct tls;
+  using reader_tls = tls;
+  using reclaim_tls = tls;
 
   struct obj_base {};
 
@@ -30,25 +33,14 @@ struct rcu_domain {
 
   void synchronize();
 
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    synchronize();
-    d(x);
-  }
-
   void barrier() { synchronize(); }
 };
 
-struct rcu_domain::tls {
+struct rcu_domain::tls : tools::nomove {
   tools::atomic<counter_t> counter;
   rcu_domain* domain_;
 
-  tls(rcu_domain* domain);
-
-  tls(const tls&) = delete;
-  tls(tls&&) = delete;
-  tls& operator=(const tls&&) = delete;
-  tls& operator=(tls&&) = delete;
+  explicit tls(rcu_domain& domain);
   ~tls();
 
   void enter() {
@@ -59,14 +51,14 @@ struct rcu_domain::tls {
     tools::asymmetric_thread_fence_light();
     counter.fetch_add(1, tools::memory_order_relaxed);
   }
-  template <typename T, typename D>
-  void retire(T* x, D d) {
+  template <typename T, typename D = std::default_delete<T>>
+  void retire(T* x, D d = {}) {
     domain_->synchronize();
     d(x);
   }
 };
 
-inline rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
+inline rcu_domain::tls::tls(rcu_domain& domain) : domain_(&domain) {
   tools::lock_guard _{domain_->tls_vec_m};
   domain_->tls_vec.push_back(this);
 }

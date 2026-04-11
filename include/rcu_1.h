@@ -4,102 +4,30 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
+#include <rcu_reading_subsystem.h>
+#include <utils.h>
 
-#include <atomic_wrappers.h>
-
-#include <algorithm>
-#include <memory>
-
-/*
- * Introduces generation counter.
- */
 namespace v1 {
 
-struct rcu_domain {
-  using counter_t = std::uint64_t;
-
-  struct tls;
-
-  struct obj_base {};
-
-  tools::mutex tls_vec_m;
-  std::vector<tls*> tls_vec;
-  rl::atomic<counter_t> generation = 1;
-
-  void synchronize();
-
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    synchronize();
-    d(x);
-  }
+struct rcu_domain : tools::rcu_reading_subsystem {
+  using reader_tls = tools::rcu_reading_subsystem::tls;
+  struct reclaim_tls;
 
   void barrier() { synchronize(); }
+
+
 };
 
-struct rcu_domain::tls {
-  tools::atomic<counter_t> counter;
-  rcu_domain* domain_;
+struct rcu_domain::reclaim_tls : tools::nomove {
+  rcu_domain* domain_ = nullptr;
 
-  tls(rcu_domain* domain);
+  explicit reclaim_tls(rcu_domain& d) : domain_(&d) {}
 
-  tls(const tls&) = delete;
-  tls(tls&&) = delete;
-  tls& operator=(const tls&&) = delete;
-  tls& operator=(tls&&) = delete;
-  ~tls();
-
-  void enter() {
-    counter_t loaded_generation =
-        domain_->generation.load(tools::memory_order_relaxed);
-    counter.store(loaded_generation, tools::memory_order_relaxed);
-    tools::asymmetric_thread_fence_light();
-  }
-  void exit() {
-    tools::asymmetric_thread_fence_light();
-    counter.store(0, tools::memory_order_relaxed);
-  }
-
-  template <typename T, typename D>
-  void retire(T* x, D d) {
+  template <typename T, typename D = std::default_delete<T>>
+  void retire(T* x, D d = {}) {
     domain_->synchronize();
     d(x);
   }
 };
-
-inline rcu_domain::tls::tls(rcu_domain* domain) : domain_(domain) {
-  tools::lock_guard _{domain_->tls_vec_m};
-  domain_->tls_vec.push_back(this);
-}
-
-inline rcu_domain::tls::~tls() {
-  tools::lock_guard _{domain_->tls_vec_m};
-  std::iter_swap(std::ranges::find(domain_->tls_vec, this),
-                 std::prev(domain_->tls_vec.end()));
-  domain_->tls_vec.pop_back();
-}
-
-inline void rcu_domain::synchronize() {
-  tools::asymmetric_thread_fence_heavy();
-
-  tools::lock_guard _{tls_vec_m};
-
-  counter_t desired = generation.load(tools::memory_order_relaxed) + 1;
-  generation.store(desired, tools::memory_order_relaxed);
-
-  while (true) {
-    bool wait_more = std::ranges::any_of(tls_vec, [desired](const tls* x) {
-      counter_t tls_counter = x->counter.load(tools::memory_order_relaxed);
-      return 0 < tls_counter && tls_counter < desired;
-    });
-
-    if (!wait_more) {
-      break;
-    }
-
-    tools::this_thread_yield();
-  }
-  tools::asymmetric_thread_fence_heavy();
-}
 
 }  // namespace v1

@@ -27,15 +27,21 @@ template <template <typename> class test, typename Domain,
 struct rcu_test_base
     : rl::test_suite<test<Domain>,
                      static_thread_count_param + has_background_task<Domain>> {
-  using tls_type = typename Domain::tls;
+  using reader_tls_type = typename Domain::reader_tls;
+  using reclaim_tls_type = typename Domain::reclaim_tls;
 
   Domain domain;
 
   auto& self() { return *static_cast<test<Domain>*>(this); }
 
-  tls_type make_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
-    rl::ctx().exec_log_msg(info, "make_tls");
-    return tls_type{&domain};
+  reader_tls_type make_reader_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    rl::ctx().exec_log_msg(info, "make_reader_tls");
+    return reader_tls_type{domain};
+  }
+
+  reclaim_tls_type make_reclaim_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+    rl::ctx().exec_log_msg(info, "make_reclaim_tls");
+    return reclaim_tls_type{domain};
   }
 
   void thread(unsigned idx) {
@@ -60,8 +66,8 @@ struct rcu_test_base
     domain.barrier();
   }
 
-  template <typename T, typename D = std::default_delete<T>>
-  void retire(tls_type& tls, T* ptr, D d = {},
+  template <typename Tls, typename T, typename D = std::default_delete<T>>
+  void retire(Tls& tls, T* ptr, D d = {},
               rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
     auto msg = std::format("retire({})", static_cast<const void*>(ptr));
     rl::ctx().exec_log_msg(info, msg.c_str());
@@ -74,7 +80,7 @@ struct rcu_test_no_mutation : rcu_test_base<rcu_test_no_mutation, Domain, 2> {
   rl::var<int> x{1};
 
   void thread_(unsigned idx) {
-    auto tls = this->make_tls();
+    auto tls = this->make_reader_tls();
     tls.enter();
     RL_ASSERT(1 == x($));
     tls.exit();
@@ -86,7 +92,7 @@ struct rcu_test_access_and_sync
     : rcu_test_base<rcu_test_access_and_sync, Domain, 3> {
   void thread_(unsigned idx) {
     if (idx != 0) {
-      auto tls = this->make_tls();
+      auto tls = this->make_reader_tls();
       tls.enter();
       tls.exit();
     } else {
@@ -103,7 +109,7 @@ struct rcu_test_min_sync : rcu_test_base<rcu_test_min_sync, Domain, 2> {
   void before() { stages[0]($) = 1; }
 
   void thread_read() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reader_tls();
     tls.enter();
     int stage = cur_stage.load(rl::memory_order_acquire);
     int val = stages[stage]($);
@@ -139,7 +145,7 @@ struct rcu_test_proper_sync : rcu_test_base<rcu_test_proper_sync, Domain, 3> {
   void before() { stages[0]($) = 1; }
 
   void thread_read() {
-    auto tls = this->make_tls($);
+    auto tls = this->make_reader_tls($);
 
     for (std::size_t i = 0; i != kNumStages; ++i) {
       tls.enter();
@@ -185,7 +191,7 @@ struct rcu_test_sync_delete : rcu_test_base<rcu_test_sync_delete, Domain, 2> {
   void before() { config.store(new rl::var<int>(1), rl::memory_order_release); }
 
   void thread_read() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reader_tls();
     tls.enter();
     const rl::var<int>* loaded = config.load(rl::memory_order_acquire);
     int val = (*loaded)($);
@@ -218,7 +224,7 @@ struct rcu_test_retire : rcu_test_base<rcu_test_retire, Domain, 2> {
   void before() { config.store(new rl::var<int>(1), rl::memory_order_release); }
 
   void thread_read() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reader_tls();
     tls.enter();
     const rl::var<int>* loaded = config.load(rl::memory_order_acquire);
     int val = (*loaded)($);
@@ -227,7 +233,7 @@ struct rcu_test_retire : rcu_test_base<rcu_test_retire, Domain, 2> {
   }
 
   void thread_write() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reclaim_tls();
     auto* upd = new rl::var<int>(2);
     this->retire(tls, config.exchange(upd, rl::memory_order_acq_rel));
   }
@@ -245,6 +251,7 @@ struct rcu_test_retire : rcu_test_base<rcu_test_retire, Domain, 2> {
     delete config.load(rl::memory_order_acquire);
   }
 };
+
 template <typename Domain>
 struct rcu_test_barrier_concurrent
     : rcu_test_base<rcu_test_barrier_concurrent, Domain, 3> {
@@ -253,14 +260,14 @@ struct rcu_test_barrier_concurrent
   void before() { config.store(new rl::var<int>(1), rl::memory_order_release); }
 
   void thread_write() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reclaim_tls();
     auto* upd = new rl::var<int>(2);
     auto* old = config.exchange(upd, rl::memory_order_acq_rel);
     this->retire(tls, old);
   }
 
   void thread_read() {
-    auto tls = this->make_tls();
+    auto tls = this->make_reader_tls();
     tls.enter();
     const rl::var<int>* loaded = config.load(rl::memory_order_acquire);
     int val = (*loaded)($);
@@ -287,7 +294,7 @@ struct rcu_test_retire_then_tls_death
 
   void thread_(unsigned idx) {
     if (idx == 0) {
-      auto tls = this->make_tls();
+      auto tls = this->make_reclaim_tls();
       this->retire(tls, &deleted, [this](rl::atomic<int>* p) {
         p->store(1, rl::memory_order_relaxed);
       });
@@ -310,7 +317,7 @@ struct rcu_test_cross_thread_reclaim
   rl::atomic<int> deleted{0};
 
   void thread_(unsigned idx) {
-    auto tls = this->make_tls();
+    auto tls = this->make_reclaim_tls();
     int n = (idx == 0) ? 1 : 4;
     for (int i = 0; i < n; ++i) {
       this->retire(tls, &deleted, [](rl::atomic<int>* p) {
