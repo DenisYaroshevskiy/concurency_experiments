@@ -36,7 +36,7 @@ struct rcu_test_base
 
   reader_tls_type make_reader_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
     rl::ctx().exec_log_msg(info, "make_reader_tls");
-    return reader_tls_type{domain.reading};
+    return reader_tls_type{domain};
   }
 
   reclaim_tls_type make_reclaim_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {

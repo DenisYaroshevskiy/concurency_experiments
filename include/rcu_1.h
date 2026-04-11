@@ -9,14 +9,13 @@
 
 namespace v1 {
 
-struct rcu_domain {
+struct rcu_domain : tools::rcu_reading_subsystem {
   using reader_tls = tools::rcu_reading_subsystem::tls;
   struct reclaim_tls;
 
-  tools::rcu_reading_subsystem reading;
-
-  void synchronize() { reading.synchronize(); }
   void barrier() { synchronize(); }
+
+
 };
 
 struct rcu_domain::reclaim_tls : tools::nomove {
