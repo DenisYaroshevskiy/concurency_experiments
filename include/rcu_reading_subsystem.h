@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <utils.h>
 
 #include <algorithm>
 
@@ -37,13 +38,8 @@ class rcu_reading_subsystem {
   tools::atomic<counter_t> generation_{1};
 };
 
-class rcu_reading_subsystem::tls {
+class rcu_reading_subsystem::tls : tools::nomove {
  public:
-  tls(const tls&) = delete;
-  tls(tls&&) = delete;
-  tls& operator=(const tls&) = delete;
-  tls& operator=(tls&&) = delete;
-
   explicit tls(rcu_reading_subsystem& s) : subsystem_(&s) {
     tools::lock_guard _{subsystem_->reader_tls_vec_m};
     subsystem_->reader_tls_vec.push_back(this);

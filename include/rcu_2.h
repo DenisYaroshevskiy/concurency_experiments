@@ -7,6 +7,7 @@
 #include <atomic_wrappers.h>
 #include <owner_stealer.h>
 #include <rcu_reading_subsystem.h>
+#include <utils.h>
 
 #include <functional>
 #include <memory>
@@ -29,14 +30,11 @@ struct rcu_domain {
   using reader_tls = tools::rcu_reading_subsystem::tls;
   struct reclaim_tls;
 
-  struct obj_base {};
-
   ~rcu_domain() { barrier(); }
 
   tools::rcu_reading_subsystem reading;
 
   void synchronize() { reading.synchronize(); }
-  reclaim_tls make_reclaim_tls();
 
   std::vector<clean_up_task> collect_some_clean_up_tasks();
   std::vector<clean_up_task> collect_all_clean_up_tasks();
@@ -64,15 +62,14 @@ struct rcu_domain::reclaim_mailbox {
   tools::owner_stealer<std::vector<clean_up_task>> to_clean_up_;
 };
 
-struct rcu_domain::reclaim_tls {
+struct rcu_domain::reclaim_tls : tools::nomove {
   tools::shared_ptr<reclaim_mailbox> mailbox_;
 
-  reclaim_tls() = default;
-  reclaim_tls(const reclaim_tls&) = delete;
-  reclaim_tls(reclaim_tls&&) = default;
-  reclaim_tls& operator=(const reclaim_tls&) = delete;
-  reclaim_tls& operator=(reclaim_tls&&) = default;
-  ~reclaim_tls() = default;
+  explicit reclaim_tls(rcu_domain& d) {
+    mailbox_ = tools::make_shared<reclaim_mailbox>();
+    tools::lock_guard _{d.reclaim_tls_vec_m};
+    d.reclaim_mailbox_vec.push_back(mailbox_);
+  }
 
   template <typename T, typename D = std::default_delete<T>>
   void retire(T* x, D d = {}) {
@@ -81,14 +78,6 @@ struct rcu_domain::reclaim_tls {
     });
   }
 };
-
-inline rcu_domain::reclaim_tls rcu_domain::make_reclaim_tls() {
-  reclaim_tls r;
-  r.mailbox_ = tools::make_shared<reclaim_mailbox>();
-  tools::lock_guard _{reclaim_tls_vec_m};
-  reclaim_mailbox_vec.push_back(r.mailbox_);
-  return r;
-}
 
 // Collect from every slot once, skipping any that are currently locked.
 inline std::vector<rcu_domain::clean_up_task>

@@ -50,6 +50,8 @@ class rcu_tls_reclaimer {
 
   std::optional<counter_t> oldest_unreclaimed() const;
 
+  void drain(std::vector<task>& here);
+
   bool try_steal_tasks(std::vector<task>& here);
   void steal_tasks_blocking(std::vector<task>& here);
 
@@ -101,6 +103,14 @@ rcu_tls_reclaimer::oldest_unreclaimed() const {
   auto v = oldest_unreclaimed_.load(tools::memory_order_relaxed);
   if (v == kNoTasks) return std::nullopt;
   return v;
+}
+
+inline void rcu_tls_reclaimer::drain(std::vector<task>& here) {
+  todo_list_.owner_access([&](auto& v) {
+    for (auto& [gen, t] : v) here.push_back(std::move(t));
+    v.clear();
+    oldest_unreclaimed_.store(kNoTasks, tools::memory_order_relaxed);
+  });
 }
 
 inline bool rcu_tls_reclaimer::try_steal_tasks(std::vector<task>& here) {

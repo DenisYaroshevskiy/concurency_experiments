@@ -5,41 +5,24 @@
 // clang-format on
 
 #include <rcu_reading_subsystem.h>
+#include <utils.h>
 
-/*
- * Introduces generation counter.
- */
 namespace v1 {
 
 struct rcu_domain {
   using reader_tls = tools::rcu_reading_subsystem::tls;
   struct reclaim_tls;
 
-  struct obj_base {};
-
   tools::rcu_reading_subsystem reading;
 
   void synchronize() { reading.synchronize(); }
-  reclaim_tls make_reclaim_tls();
-
-  template <typename T, typename D>
-  void retire(T* x, D d) {
-    synchronize();
-    d(x);
-  }
-
   void barrier() { synchronize(); }
 };
 
-struct rcu_domain::reclaim_tls {
+struct rcu_domain::reclaim_tls : tools::nomove {
   rcu_domain* domain_ = nullptr;
 
-  reclaim_tls() = default;
-  reclaim_tls(const reclaim_tls&) = delete;
-  reclaim_tls(reclaim_tls&&) = default;
-  reclaim_tls& operator=(const reclaim_tls&) = delete;
-  reclaim_tls& operator=(reclaim_tls&&) = default;
-  ~reclaim_tls() = default;
+  explicit reclaim_tls(rcu_domain& d) : domain_(&d) {}
 
   template <typename T, typename D = std::default_delete<T>>
   void retire(T* x, D d = {}) {
@@ -47,11 +30,5 @@ struct rcu_domain::reclaim_tls {
     d(x);
   }
 };
-
-inline rcu_domain::reclaim_tls rcu_domain::make_reclaim_tls() {
-  reclaim_tls r;
-  r.domain_ = this;
-  return r;
-}
 
 }  // namespace v1

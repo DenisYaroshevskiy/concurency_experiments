@@ -9,6 +9,7 @@
 #include <atomic_wrappers.h>
 #include <rcu_reading_subsystem.h>
 #include <rcu_tls_reclaimer.h>
+#include <utils.h>
 
 #include <functional>
 #include <memory>
@@ -34,6 +35,9 @@
  *
  * There is no background thread; garbage_collect() is called by a user thread
  * that accumulates retire_threshold unreclaimed tasks, or explicitly.
+ *
+ * Dead reclaim_tls entries (use_count == 1 in reclaim_mailbox_vec) are evicted
+ * and drained by barrier().
  */
 
 namespace v3 {
@@ -59,14 +63,13 @@ struct rcu_domain {
   tools::rcu_reading_subsystem reading;
 
   void synchronize() { reading.synchronize(); }
-  reclaim_tls make_reclaim_tls();
   void garbage_collect();
   void barrier();
 
  private:
   struct reclaim_mailbox;
 
-  tools::mutex reclaim_tls_vec_m;
+  tools::mutex reclaim_mailbox_vec_m;
   std::vector<tools::shared_ptr<reclaim_mailbox>> reclaim_mailbox_vec;
   tools::atomic<counter_t> last_stale_gen{0};
 
@@ -77,16 +80,15 @@ struct rcu_domain::reclaim_mailbox {
   tools::rcu_tls_reclaimer reclaimer_;
 };
 
-struct rcu_domain::reclaim_tls {
+struct rcu_domain::reclaim_tls : tools::nomove {
   tools::shared_ptr<reclaim_mailbox> mailbox_;
-  rcu_domain* domain_ = nullptr;
+  rcu_domain* domain_;
 
-  reclaim_tls() = default;
-  reclaim_tls(const reclaim_tls&) = delete;
-  reclaim_tls(reclaim_tls&&) = default;
-  reclaim_tls& operator=(const reclaim_tls&) = delete;
-  reclaim_tls& operator=(reclaim_tls&&) = default;
-  ~reclaim_tls() = default;
+  explicit reclaim_tls(rcu_domain& d) : domain_(&d) {
+    mailbox_ = tools::make_shared<reclaim_mailbox>();
+    tools::lock_guard _{d.reclaim_mailbox_vec_m};
+    d.reclaim_mailbox_vec.push_back(mailbox_);
+  }
 
   template <typename T, typename D = std::default_delete<T>>
   void retire(T* x, D d = {}) {
@@ -99,22 +101,13 @@ struct rcu_domain::reclaim_tls {
   }
 };
 
-inline rcu_domain::reclaim_tls rcu_domain::make_reclaim_tls() {
-  reclaim_tls r;
-  r.mailbox_ = tools::make_shared<reclaim_mailbox>();
-  r.domain_ = this;
-  tools::lock_guard _{reclaim_tls_vec_m};
-  reclaim_mailbox_vec.push_back(r.mailbox_);
-  return r;
-}
-
 inline void rcu_domain::collect_stale_tasks(std::vector<clean_up_task>& out,
                                             counter_t current_gen) {
-  tools::lock_guard _{reclaim_tls_vec_m};
-  for (auto& r : reclaim_mailbox_vec) {
-    auto oldest = r->reclaimer_.oldest_unreclaimed();
+  tools::lock_guard _{reclaim_mailbox_vec_m};
+  for (auto& m : reclaim_mailbox_vec) {
+    auto oldest = m->reclaimer_.oldest_unreclaimed();
     if (oldest && *oldest + config_.stale_gen_threshold <= current_gen) {
-      r->reclaimer_.try_steal_tasks(out);
+      m->reclaimer_.try_steal_tasks(out);
     }
   }
 }
@@ -142,12 +135,18 @@ inline void rcu_domain::barrier() {
   std::vector<clean_up_task> tasks;
 
   {
-    tools::lock_guard _{reclaim_tls_vec_m};
+    tools::lock_guard _{reclaim_mailbox_vec_m};
+    auto move_tasks = [&](std::vector<clean_up_task>& v) {
+      tasks.insert(tasks.end(), std::make_move_iterator(v.begin()),
+                   std::make_move_iterator(v.end()));
+      v.clear();
+    };
+
     std::vector<reclaim_mailbox*> busy;
-    std::erase_if(reclaim_mailbox_vec, [&](const auto& x) {
-      bool dead = x.use_count() == 1;
-      if (!x->reclaimer_.try_steal_tasks(tasks)) {
-        busy.push_back(x.get());
+    std::erase_if(reclaim_mailbox_vec, [&](const auto& m) {
+      bool dead = m.use_count() == 1;
+      if (!m->reclaimer_.try_steal_tasks(tasks)) {
+        busy.emplace_back(m.get());
         return false;
       }
       return dead;

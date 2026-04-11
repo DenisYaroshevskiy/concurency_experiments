@@ -39,9 +39,9 @@ struct rcu_test_base
     return reader_tls_type{domain.reading};
   }
 
-  auto make_reclaim_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
+  reclaim_tls_type make_reclaim_tls(rl::debug_info_param info DEFAULTED_DEBUG_INFO) {
     rl::ctx().exec_log_msg(info, "make_reclaim_tls");
-    return domain.make_reclaim_tls();
+    return reclaim_tls_type{domain};
   }
 
   void thread(unsigned idx) {
