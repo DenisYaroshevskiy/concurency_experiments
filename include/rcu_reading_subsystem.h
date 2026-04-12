@@ -73,12 +73,16 @@ class rcu_reading_subsystem::tls : tools::nomove {
       return;
     }
 
+    // This light fence is to communicate with rcu::sync.
     tools::asymmetric_thread_fence_light();
     counter_.store(0, tools::memory_order_relaxed);
+
+    // This light fence is to communicate with wait.
     tools::asymmetric_thread_fence_light();
 
     if (waiting_.load(tools::memory_order_relaxed)) [[unlikely]] {
       counter_.notify_one();
+      waiting_.store(false, tools::memory_order_relaxed);
     }
   }
 
@@ -94,12 +98,30 @@ class rcu_reading_subsystem::tls : tools::nomove {
       return;
     }
     waiting_.store(true, tools::memory_order_relaxed);
-    tools::asymmetric_thread_fence_heavy();
-    counter_.wait(cur, tools::memory_order_relaxed);
-    wait(desired);
-  }
 
-  rcu_reading_subsystem& subsystem() const { return *subsystem_; }
+    // Makes sure that the reader will see the waiting signal before we sleep.
+    tools::asymmetric_thread_fence_heavy();
+
+    counter_.wait(cur, tools::memory_order_relaxed);
+    // Counter is guaranteed to have changed, that's why we don't need to check,
+    // that's how the wait API works.
+    // However, we can't really test `is_reading(desired)` - that might be false,
+    // because the reader might have re-entered the critical section with the same counter value.
+    // Good news is that we don't care, the - heavy fence from sync has to syncrhonize with light
+    // fence in entry, so we are OK.
+
+    // I'm not sure I need this fence.
+    // The goal here is to not clear the "waiting" signal before doing the wait.
+    // However it's possible that "wait" gives us enough ordering.
+    // Folly doesn't have this fence:
+    // https://github.com/facebook/folly/blob/main/folly/synchronization/detail/ThreadCachedReaders.h#L184
+    //
+    // It's also OK to just completely remove the next two lines - then only the
+    // reader clears the waiting_ signal - there is a tiny chance of an extra
+    // notification.
+    tools::asymmetric_thread_fence_heavy();
+    waiting_.store(false, tools::memory_order_relaxed);
+  }
 
  private:
   friend class rcu_reading_subsystem;
