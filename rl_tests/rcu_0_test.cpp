@@ -12,4 +12,4 @@
 
 #include "rcu_rl_tests.h"
 
-int main() { simulate<v0::rcu_domain>(); }
+int main() { minimal_test<v0::rcu_domain>(); }

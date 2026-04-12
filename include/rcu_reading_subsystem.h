@@ -19,6 +19,9 @@ namespace tools {
  * Maintains a per-thread counter vec and a generation counter.
  * synchronize() advances the generation and waits until all readers that
  * entered before the advance have exited.
+ *
+ * supports nested entering
+ * supports blocking waits for the synchronize.
  */
 class rcu_reading_subsystem {
  public:
@@ -54,22 +57,59 @@ class rcu_reading_subsystem::tls : tools::nomove {
 
   void enter() {
     counter_t g = subsystem_->generation_.load(tools::memory_order_relaxed);
-    counter.store(g, tools::memory_order_relaxed);
+    counter_t cur = counter_.load(tools::memory_order_relaxed);
+
+    if (cur) [[unlikely]] {
+      ++nested_readers_;
+      return;
+    }
+
+    counter_.store(g, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_light();
   }
   void exit() {
+    if (nested_readers_) [[unlikely]] {
+      --nested_readers_;
+      return;
+    }
+
     tools::asymmetric_thread_fence_light();
-    counter.store(0, tools::memory_order_relaxed);
+    counter_.store(0, tools::memory_order_relaxed);
+    tools::asymmetric_thread_fence_light();
+
+    if (waiting_.load(tools::memory_order_relaxed)) [[unlikely]] {
+      counter_.notify_one();
+    }
   }
 
-  rcu_reading_subsystem& subsystem() const {
-    return *subsystem_;
+  bool is_reading(counter_t desired) const {
+    counter_t cur = counter_.load(tools::memory_order_relaxed);
+    return 0 < cur && cur < desired;
   }
+
+  // At most one waiter
+  void wait(counter_t desired) {
+    counter_t cur = counter_.load(tools::memory_order_relaxed);
+    if (cur == 0 || cur >= desired) {
+      return;
+    }
+    waiting_.store(true, tools::memory_order_relaxed);
+    tools::asymmetric_thread_fence_heavy();
+    counter_.wait(cur, tools::memory_order_relaxed);
+    wait(desired);
+  }
+
+  rcu_reading_subsystem& subsystem() const { return *subsystem_; }
 
  private:
   friend class rcu_reading_subsystem;
 
-  tools::atomic<counter_t> counter{0};
+  // There is a false sharing in theory here but
+  // this is not the case where we expect it to be relevant.
+  tools::atomic<counter_t> counter_{0};
+  std::uint32_t nested_readers_ = 0;
+  tools::atomic<bool> waiting_{false};
+
   rcu_reading_subsystem* subsystem_;
 };
 
@@ -81,16 +121,16 @@ inline void rcu_reading_subsystem::synchronize() {
   counter_t desired = generation_.load(tools::memory_order_relaxed) + 1;
   generation_.store(desired, tools::memory_order_relaxed);
 
-  while (true) {
-    bool wait_more =
-        std::ranges::any_of(reader_tls_vec, [desired](const tls* x) {
-          counter_t c = x->counter.load(tools::memory_order_relaxed);
-          return 0 < c && c < desired;
-        });
+  std::vector<tls*> waiting;
+  waiting.reserve(reader_tls_vec.size());
+  std::ranges::copy_if(
+      reader_tls_vec, std::back_inserter(waiting),
+      [desired](const tls* x) { return x->is_reading(desired); });
 
-    if (!wait_more) break;
-    tools::this_thread_yield();
+  for (auto* tls : waiting) {
+    tls->wait(desired);
   }
+
   tools::asymmetric_thread_fence_heavy();
 }
 
