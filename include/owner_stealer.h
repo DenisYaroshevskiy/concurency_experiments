@@ -22,10 +22,11 @@ namespace tools {
  *
  * NOTE: the stealer is reponsible for cleaning up the object that'll be reused
  *
- * active_ encodes three states:
+ * active_ encodes two states:
  *   &objs_[0] / &objs_[1]  — idle, owner's current buffer
  *   nullptr                 — owner holds the lock
- *   objs_.end()             — stealer is sleeping (blocking_stealer_access)
+ *
+ * wait_ signals that the stealer is sleeping (blocking_stealer_access).
  *
  * In our case T is typically a container of tasks.
  * Owner can always access a container of tasks.
@@ -53,8 +54,7 @@ class owner_stealer {
  private:
   std::array<tools::var<T>, 2> objs_;
   tools::atomic<tools::var<T>*> active_{&objs_[0]};
-
-  tools::var<T>* sleeping_sentinel() { return objs_.data() + 2; }
+  tools::atomic<bool> wait_{false};
 
   void notify_stealer();
   void wait_for_owner();
@@ -66,8 +66,9 @@ void owner_stealer<T>::owner_access(F&& f) {
   auto* ptr = active_.exchange(nullptr, tools::memory_order_acquire);
   std::forward<F>(f)(ptr->write());
 
-  if (active_.exchange(ptr, tools::memory_order_release) != nullptr)
-      [[unlikely]] {
+  active_.store(ptr, tools::memory_order_release);
+  tools::asymmetric_thread_fence_light();
+  if (wait_.load(tools::memory_order_relaxed)) [[unlikely]] {
     notify_stealer();
   }
 }
@@ -75,6 +76,7 @@ void owner_stealer<T>::owner_access(F&& f) {
 template <typename T>
 void owner_stealer<T>::notify_stealer() {
   active_.notify_one();
+  wait_.store(false, tools::memory_order_relaxed);
 }
 
 template <typename T>
@@ -101,12 +103,9 @@ void owner_stealer<T>::blocking_stealer_access(F&& f) {
 
 template <typename T>
 void owner_stealer<T>::wait_for_owner() {
-  tools::var<T>* expected = nullptr;
-  if (active_.compare_exchange_strong(expected, sleeping_sentinel(),
-                                      tools::memory_order_relaxed,
-                                      tools::memory_order_relaxed)) {
-    active_.wait(sleeping_sentinel());
-  }
+  wait_.store(true, tools::memory_order_relaxed);
+  tools::asymmetric_thread_fence_heavy();
+  active_.wait(nullptr, tools::memory_order_relaxed);
 }
 
 }  // namespace tools
