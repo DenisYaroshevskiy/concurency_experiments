@@ -18,4 +18,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include_directories("./include")
 include_directories("../relacy")
+
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${CMAKE_SOURCE_DIR}/../benchmark" "${CMAKE_BINARY_DIR}/benchmark_build")
+
 add_subdirectory("./rl_tests")
