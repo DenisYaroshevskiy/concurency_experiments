@@ -57,7 +57,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
     counter_t cur = counter.load(tools::memory_order_relaxed);
 
     if (cur) [[unlikely]] {
-      not_standard_situtation.fetch_add(1, tools::memory_order_relaxed);
+      ++nested_readers_;
       return;
     }
 
@@ -65,10 +65,8 @@ class rcu_reading_subsystem::tls : tools::nomove {
     tools::asymmetric_thread_fence_light();
   }
   void exit() {
-    counter_t unusual =
-        not_standard_situtation.load(tools::memory_order_relaxed);
-    if (unusual) [[unlikely]] {
-      unusual_exit(unusual);
+    if (nested_readers_) [[unlikely]] {
+      --nested_readers_;
       return;
     }
 
@@ -76,25 +74,21 @@ class rcu_reading_subsystem::tls : tools::nomove {
     counter.store(0, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_light();
 
-    counter_t waiting = not_standard_situtation.load(tools::memory_order_relaxed);
-    if (waiting) [[unlikely]] {
+    if (waiting.load(tools::memory_order_relaxed)) [[unlikely]] {
       counter.notify_one();
+      waiting_.store(false, tools::memory_order_relaxed)
     }
   }
 
   // At most one waiter
   void wait(counter_t desired) {
-    counter_t c = counter.load(tools::memory_order_relaxed);
-    if (0 == c || c >= desired) {
+    counter_t cur = counter_.load(std::memory_order_relaxed);
+    if (cur == 0 || cur >= desired) {
       return;
     }
-    set_waiting_bit();
-    tools::asymmetric_thread_fence_heavy();
-    counter.wait(c, tools::memory_order_relaxed);
-    clear_waiting_bit();
-
-    // it is possible that this wait always immediately returns
-    // but I find it not obvious to prove.
+    waiting_.store(true, tools::memory_order_relaxed);
+    tools::asymmetric_fence_heavy();
+    counter_.wait(cur, std::memory_order_relaxed);
     wait(desired);
   }
 
@@ -103,54 +97,11 @@ class rcu_reading_subsystem::tls : tools::nomove {
  private:
   friend class rcu_reading_subsystem;
 
-  static_assert(sizeof(counter_t) == 8, "");
-  static constexpr counter_t waiting_bit = (counter_t)1 << 63;
-
-  void unusual_exit(counter_t unusual) {
-    bool is_shared = unusual & ~waiting_bit;
-    if (is_shared) {
-      not_standard_situtation.fetch_sub(1, tools::memory_order_relaxed);
-      return;
-    }
-
-    // If we are here - means the sync is waiting.
-
-    // exit the critical section.
-    {
-      tools::asymmetric_thread_fence_light();
-      counter.store(0, tools::memory_order_relaxed);
-      tools::asymmetric_thread_fence_light();
-    }
-
-    // are still waiting?
-    unusual = not_standard_situtation.load(tools::memory_order_relaxed);
-    if (!unusual) {
-      return;
-    }
-
-    clear_waiting_bit();
-    counter.notify_one();
-  }
-
-  void set_waiting_bit() {
-    counter_t cur = not_standard_situtation.load(tools::memory_order_relaxed);
-    while (!not_standard_situtation.compare_exchange_weak(
-        cur, cur | waiting_bit, tools::memory_order_relaxed));
-  }
-
-  void clear_waiting_bit() {
-    counter_t cur = not_standard_situtation.load(tools::memory_order_relaxed);
-
-    // it's possible that we don't need the spin here.
-    while (!not_standard_situtation.compare_exchange_weak(
-        cur, cur & ~waiting_bit, tools::memory_order_relaxed));
-  }
-
-  tools::atomic<counter_t> counter{0};
-
-  // a counter that indicates something unsual is happening
-  // bits below the top one -
-  tools::atomic<counter_t> not_standard_situtation{0};
+  // There is a false sharing in theory here but
+  // this is not the case where we expect it to be relevant.
+  tools::atomic<counter_t> counter_{0};
+  std::uint32_t nested_readers_;
+  std::atomic<bool> waiting_;
 
   rcu_reading_subsystem* subsystem_;
 };
