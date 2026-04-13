@@ -98,7 +98,7 @@ inline void rcu_domain::synchronize() {
     std::erase_if(to_clear_vec, [&](const auto& e) {
       auto [tls, count] = e;
       auto found = cur_map.find(tls);
-      return found == cur_map.end() || found->second == count;
+      return found == cur_map.end() || found->second != count;
     });
   }
 
