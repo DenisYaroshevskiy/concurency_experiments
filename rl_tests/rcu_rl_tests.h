@@ -12,6 +12,8 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
+#include "rl_simulate.h"
+
 #include <array>
 #include <concepts>
 #include <format>
@@ -333,16 +335,16 @@ struct rcu_test_cross_thread_reclaim
 };
 
 template <typename Domain>
-void minimal_test() {
-  rl::simulate<rcu_test_no_mutation<Domain>>();
-  rl::simulate<rcu_test_access_and_sync<Domain>>();
-  rl::simulate<rcu_test_min_sync<Domain>>();
-  rl::simulate<rcu_test_proper_sync<Domain>>();
-  rl::simulate<rcu_test_sync_delete<Domain>>();
-  rl::simulate<rcu_test_retire<Domain>>();
-  rl::simulate<rcu_test_barrier_concurrent<Domain>>();
-  rl::simulate<rcu_test_retire_then_tls_death<Domain>>();
-  rl::simulate<rcu_test_cross_thread_reclaim<Domain>>();
+bool minimal_test() {
+  return simulate<rcu_test_no_mutation<Domain>>()
+      && simulate<rcu_test_access_and_sync<Domain>>()
+      && simulate<rcu_test_min_sync<Domain>>()
+      && simulate<rcu_test_proper_sync<Domain>>()
+      && simulate<rcu_test_sync_delete<Domain>>()
+      && simulate<rcu_test_retire<Domain>>()
+      && simulate<rcu_test_barrier_concurrent<Domain>>()
+      && simulate<rcu_test_retire_then_tls_death<Domain>>()
+      && simulate<rcu_test_cross_thread_reclaim<Domain>>();
 }
 
 template <typename Domain>
@@ -383,9 +385,9 @@ struct rcu_test_nested_read : rcu_test_base<rcu_test_nested_read, Domain, 2> {
 };
 
 template <typename Domain>
-void full_test() {
-  minimal_test<Domain>();
-  rl::simulate<rcu_test_nested_read<Domain>>();
+bool full_test() {
+  return minimal_test<Domain>()
+      && simulate<rcu_test_nested_read<Domain>>();
 }
 
 #endif  // RCU_RL_TESTS_H

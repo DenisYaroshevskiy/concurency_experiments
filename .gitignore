@@ -6,3 +6,4 @@ build2/*
 temp-plot*
 .DS_Store
 vscode_view.code-workspace
+report.txt

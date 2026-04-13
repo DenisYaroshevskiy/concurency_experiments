@@ -31,7 +31,7 @@ struct rcu_v3_cfg_stale : v3::rcu_domain {
 };
 
 int main() {
-  full_test<v3::rcu_domain>();
-  full_test<rcu_v3_small_cfg>();
-  full_test<rcu_v3_cfg_stale>();
+  return (full_test<v3::rcu_domain>()
+       && full_test<rcu_v3_small_cfg>()
+       && full_test<rcu_v3_cfg_stale>()) ? 0 : 1;
 }
