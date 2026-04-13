@@ -12,6 +12,8 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
+#include "rl_simulate.h"
+
 struct atrocious_mutex_test_var : rl::test_suite<atrocious_mutex_test_var, 2> {
   rl::var<int> var;
   tools::atrocious_mutex m;
@@ -43,6 +45,6 @@ struct atrocious_mutex_test_atomic
 };
 
 int main() {
-  rl::simulate<atrocious_mutex_test_var>();
-  rl::simulate<atrocious_mutex_test_atomic>();
+  return (simulate<atrocious_mutex_test_var>()
+       && simulate<atrocious_mutex_test_atomic>()) ? 0 : 1;
 }

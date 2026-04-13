@@ -13,6 +13,8 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
+#include "rl_simulate.h"
+
 // Task added at gen G becomes ready only when current_gen >= G+2.
 struct reclaimer_owner_cleans : rl::test_suite<reclaimer_owner_cleans, 1> {
   tools::rcu_tls_reclaimer r;
@@ -118,9 +120,9 @@ struct reclaimer_steal_blocking : rl::test_suite<reclaimer_steal_blocking, 2> {
 };
 
 int main() {
-  rl::simulate<reclaimer_owner_cleans>();
-  rl::simulate<reclaimer_inline_clean>();
-  rl::simulate<reclaimer_partial_clean>();
-  rl::simulate<reclaimer_try_steal>();
-  rl::simulate<reclaimer_steal_blocking>();
+  return (simulate<reclaimer_owner_cleans>()
+       && simulate<reclaimer_inline_clean>()
+       && simulate<reclaimer_partial_clean>()
+       && simulate<reclaimer_try_steal>()
+       && simulate<reclaimer_steal_blocking>()) ? 0 : 1;
 }
