@@ -13,6 +13,8 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
+#include "rl_simulate.h"
+
 #include <vector>
 
 // Owner pushes a value; stealer loops until it collects it.
@@ -133,9 +135,9 @@ struct owner_stealer_alternating : rl::test_suite<owner_stealer_alternating, 1> 
 };
 
 int main() {
-  rl::simulate<owner_stealer_try_basic>();
-  rl::simulate<owner_stealer_memory_order>();
-  rl::simulate<owner_stealer_blocking>();
-  rl::simulate<owner_stealer_multi_push>();
-  rl::simulate<owner_stealer_alternating>();
+  return (simulate<owner_stealer_try_basic>()
+       && simulate<owner_stealer_memory_order>()
+       && simulate<owner_stealer_blocking>()
+       && simulate<owner_stealer_multi_push>()
+       && simulate<owner_stealer_alternating>()) ? 0 : 1;
 }

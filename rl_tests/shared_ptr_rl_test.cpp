@@ -13,6 +13,8 @@
 #include <relacy/test_suite.hpp>
 #include <relacy/var.hpp>
 
+#include "rl_simulate.h"
+
 // Single-thread: basic construction, copy, move, use_count.
 struct shared_ptr_basic : rl::test_suite<shared_ptr_basic, 1> {
   void thread(unsigned) {
@@ -84,8 +86,8 @@ struct shared_ptr_release_visible : rl::test_suite<shared_ptr_release_visible, 2
 };
 
 int main() {
-  rl::simulate<shared_ptr_basic>();
-  rl::simulate<shared_ptr_make_shared>();
-  rl::simulate<shared_ptr_concurrent_release>();
-  rl::simulate<shared_ptr_release_visible>();
+  return (simulate<shared_ptr_basic>()
+       && simulate<shared_ptr_make_shared>()
+       && simulate<shared_ptr_concurrent_release>()
+       && simulate<shared_ptr_release_visible>()) ? 0 : 1;
 }
