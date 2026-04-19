@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <condition_waiter.h>
 #include <utils.h>
 
 #include <algorithm>
@@ -77,13 +78,8 @@ class rcu_reading_subsystem::tls : tools::nomove {
     tools::asymmetric_thread_fence_light();
     counter_.store(0, tools::memory_order_relaxed);
 
-    // This light fence is to communicate with wait.
-    tools::asymmetric_thread_fence_light();
 
-    if (waiting_.load(tools::memory_order_relaxed)) [[unlikely]] {
-      waiting_.store(false, tools::memory_order_relaxed);
-      waiting_.notify_one();
-    }
+    waiter_.notify_if_waiting();
   }
 
   bool is_reading(counter_t desired) const {
@@ -94,18 +90,12 @@ class rcu_reading_subsystem::tls : tools::nomove {
   // At most one waiter
   void wait(counter_t desired) {
     counter_t first_seen = counter_.load(tools::memory_order_relaxed);
-    if (0 == first_seen || first_seen >= desired) {
+    if (first_seen == 0 || first_seen >= desired) {
       return;
     }
-    waiting_.store(true, tools::memory_order_relaxed);
-    tools::asymmetric_thread_fence_heavy();
-    counter_t cur = counter_.load(tools::memory_order_relaxed);
-    if (cur != first_seen) {
-      waiting_.store(false, tools::memory_order_relaxed);
-      return;
-    }
-    tools::asymmetric_thread_fence_heavy();
-    waiting_.wait(true, tools::memory_order_relaxed);
+    waiter_.wait_until([&] {
+      return counter_.load(tools::memory_order_relaxed) != first_seen;
+    });
   }
 
  private:
@@ -115,7 +105,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
   // this is not the case where we expect it to be relevant.
   tools::atomic<counter_t> counter_{0};
   std::uint32_t nested_readers_ = 0;
-  tools::atomic<bool> waiting_{false};
+  tools::condition_waiter waiter_;
 
   rcu_reading_subsystem* subsystem_;
 };
