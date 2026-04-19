@@ -16,7 +16,7 @@ class condition_waiter : nomove {
   template <typename Pred>
   void wait_until(Pred pred) {
     waiting_.store(true, memory_order_relaxed);
-    asymmetric_thread_fence_heavy();
+    tools::asymmetric_thread_fence_heavy();
     if (pred()) {
       waiting_.store(false, memory_order_relaxed);
       return;
@@ -27,7 +27,6 @@ class condition_waiter : nomove {
   }
 
   void notify_if_waiting() {
-    // This light fence is to communicate with wait.
     tools::asymmetric_thread_fence_light();
     if (waiting_.load(memory_order_relaxed)) {
       waiting_.store(false, memory_order_relaxed);

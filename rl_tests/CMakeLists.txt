@@ -14,6 +14,7 @@ function(add_benchmark name source)
     target_link_libraries(${name} PRIVATE benchmark::benchmark)
 endfunction()
 
+add_rl_test(condition_waiter_rl_test condition_waiter_rl_test.cpp)
 add_rl_test(atrocious_mutex_rl_test atrocious_mutex_rl_test.cpp)
 add_rl_test(rcu_0_test rcu_0_test.cpp)
 add_rl_test(rcu_1_test rcu_1_test.cpp)
