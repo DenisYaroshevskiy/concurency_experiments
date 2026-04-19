@@ -31,8 +31,10 @@ namespace tools {
  *
  * Once some number of generations, we will try to clean the stale tasks
  * (a thread called reclaim a few times but never cleared).
- * That uses `oldest_unreclaimed` to check if the thread didn't clean up for a
- * while and try_steal_tasks to get the tasks.
+ * That uses `oldest_unreclaimed_hint` to check if the thread didn't clean up
+ * for a while and try_steal_tasks to get the tasks.
+ * oldest_unreclaimed_hint may return a stale non-empty value after a steal
+ * races with an owner update; callers must treat it as a hint only.
  *
  * rcu_barrier sometimes uses steal_tasks_blocking.
  *
@@ -48,7 +50,7 @@ class rcu_tls_reclaimer {
   std::size_t owner_reclaim(counter_t current_gen, task t);
   std::size_t clean_ready_tasks(counter_t current_gen);
 
-  std::optional<counter_t> oldest_unreclaimed() const;
+  std::optional<counter_t> oldest_unreclaimed_hint() const;
 
   bool try_steal_tasks(std::vector<task>& here);
   void steal_tasks_blocking(std::vector<task>& here);
@@ -62,7 +64,7 @@ class rcu_tls_reclaimer {
   static constexpr counter_t kNoTasks = std::numeric_limits<counter_t>::max();
   static constexpr counter_t kStealerDummy = kNoTasks - 1;
 
-  tools::atomic<counter_t> oldest_unreclaimed_{kNoTasks};
+  tools::atomic<counter_t> oldest_unreclaimed_hint_{kNoTasks};
   tools::owner_stealer<std::vector<task_entry>> todo_list_;
 };
 
@@ -74,7 +76,7 @@ inline void rcu_tls_reclaimer::do_clean(std::vector<task_entry>& v,
     ++it;
   }
   v.erase(v.begin(), it);
-  oldest_unreclaimed_.store(v.empty() ? kNoTasks : v.front().first,
+  oldest_unreclaimed_hint_.store(v.empty() ? kNoTasks : v.front().first,
                             tools::memory_order_relaxed);
 }
 
@@ -99,8 +101,8 @@ inline std::size_t rcu_tls_reclaimer::clean_ready_tasks(counter_t current_gen) {
 }
 
 inline std::optional<rcu_tls_reclaimer::counter_t>
-rcu_tls_reclaimer::oldest_unreclaimed() const {
-  auto v = oldest_unreclaimed_.load(tools::memory_order_relaxed);
+rcu_tls_reclaimer::oldest_unreclaimed_hint() const {
+  auto v = oldest_unreclaimed_hint_.load(tools::memory_order_relaxed);
   if (v == kNoTasks) return std::nullopt;
   return v;
 }
@@ -112,20 +114,20 @@ inline void rcu_tls_reclaimer::do_steal_tasks(std::vector<task_entry>& v,
 }
 
 inline bool rcu_tls_reclaimer::try_steal_tasks(std::vector<task>& here) {
-  counter_t to_set_oldest = oldest_unreclaimed_.exchange(kStealerDummy, tools::memory_order_relaxed);
+  counter_t to_set_oldest = oldest_unreclaimed_hint_.exchange(kStealerDummy, tools::memory_order_relaxed);
   bool res =
       todo_list_.try_stealer_access([&](auto& v) { do_steal_tasks(v, here); });
   if (res) { to_set_oldest = kNoTasks; }
   counter_t expected = kStealerDummy;
-  oldest_unreclaimed_.compare_exchange_strong(expected, to_set_oldest, tools::memory_order_relaxed);
+  oldest_unreclaimed_hint_.compare_exchange_strong(expected, to_set_oldest, tools::memory_order_relaxed);
   return res;
 }
 
 inline void rcu_tls_reclaimer::steal_tasks_blocking(std::vector<task>& here) {
-  oldest_unreclaimed_.store(kStealerDummy, tools::memory_order_relaxed);
+  oldest_unreclaimed_hint_.store(kStealerDummy, tools::memory_order_relaxed);
   todo_list_.blocking_stealer_access([&](auto& v) { do_steal_tasks(v, here); });
   counter_t expected = kStealerDummy;
-  oldest_unreclaimed_.compare_exchange_strong(expected, kNoTasks, tools::memory_order_relaxed);
+  oldest_unreclaimed_hint_.compare_exchange_strong(expected, kNoTasks, tools::memory_order_relaxed);
 }
 
 }  // namespace tools

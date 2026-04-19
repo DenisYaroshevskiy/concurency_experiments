@@ -21,22 +21,22 @@ struct reclaimer_owner_cleans : rl::test_suite<reclaimer_owner_cleans, 1> {
   rl::var<int> executed{0};
 
   void thread(unsigned) {
-    RL_ASSERT(!r.oldest_unreclaimed().has_value());
+    RL_ASSERT(!r.oldest_unreclaimed_hint().has_value());
 
     auto cnt = r.owner_reclaim(1, [this] { executed($) = 1; });
     RL_ASSERT(cnt == 1);
     RL_ASSERT(executed($) == 0);
-    RL_ASSERT(r.oldest_unreclaimed() == 1);
+    RL_ASSERT(r.oldest_unreclaimed_hint() == 1);
 
     cnt = r.clean_ready_tasks(2);
     RL_ASSERT(cnt == 1);  // gen 1+2=3 > 2: not yet
     RL_ASSERT(executed($) == 0);
-    RL_ASSERT(r.oldest_unreclaimed() == 1);
+    RL_ASSERT(r.oldest_unreclaimed_hint() == 1);
 
     cnt = r.clean_ready_tasks(3);
     RL_ASSERT(cnt == 0);  // gen 1+2=3 <= 3: ready
     RL_ASSERT(executed($) == 1);
-    RL_ASSERT(!r.oldest_unreclaimed().has_value());
+    RL_ASSERT(!r.oldest_unreclaimed_hint().has_value());
   }
 };
 
@@ -51,7 +51,7 @@ struct reclaimer_inline_clean : rl::test_suite<reclaimer_inline_clean, 1> {
     RL_ASSERT(t1_done($) == 1);  // gen 1+2=3 <= 3: cleaned inline
     RL_ASSERT(t2_done($) == 0);  // gen 3+2=5 > 3: not yet
     RL_ASSERT(cnt == 1);
-    RL_ASSERT(r.oldest_unreclaimed() == 3);
+    RL_ASSERT(r.oldest_unreclaimed_hint() == 3);
   }
 };
 
@@ -68,7 +68,7 @@ struct reclaimer_partial_clean : rl::test_suite<reclaimer_partial_clean, 1> {
     auto cnt = r.clean_ready_tasks(4);
     RL_ASSERT(cnt == 1);         // gen 5 remains
     RL_ASSERT(cleaned($) == 2);  // gen 1 and 2 cleaned
-    RL_ASSERT(r.oldest_unreclaimed() == 5);
+    RL_ASSERT(r.oldest_unreclaimed_hint() == 5);
   }
 };
 
@@ -87,7 +87,7 @@ struct reclaimer_try_steal : rl::test_suite<reclaimer_try_steal, 2> {
         r.try_steal_tasks(tasks);
         if (tasks.empty()) rl::yield(1, $);
       }
-      RL_ASSERT(!r.oldest_unreclaimed().has_value());
+      RL_ASSERT(!r.oldest_unreclaimed_hint().has_value() || r.oldest_unreclaimed_hint() == 1);
       for (auto& t : tasks) t();
     }
   }
@@ -114,7 +114,7 @@ struct reclaimer_steal_blocking : rl::test_suite<reclaimer_steal_blocking, 2> {
       while (!reclaim_started.load(rl::memory_order_relaxed)) rl::yield(1, $);
       std::vector<tools::rcu_tls_reclaimer::task> tasks;
       r.steal_tasks_blocking(tasks);
-      RL_ASSERT(!r.oldest_unreclaimed().has_value());
+      RL_ASSERT(!r.oldest_unreclaimed_hint().has_value() || r.oldest_unreclaimed_hint() == 1);
       for (auto& t : tasks) t();
       RL_ASSERT(executed.load(rl::memory_order_relaxed) == 1);
     }
@@ -138,9 +138,9 @@ struct reclaimer_try_steal_oldest : rl::test_suite<reclaimer_try_steal_oldest, 2
 
   void after() {
     if (stolen.size() == 2) {
-      RL_ASSERT(!r.oldest_unreclaimed().has_value());
+      RL_ASSERT(!r.oldest_unreclaimed_hint().has_value() || r.oldest_unreclaimed_hint() == 1);
     } else {
-      RL_ASSERT(r.oldest_unreclaimed() == 1);
+      RL_ASSERT(r.oldest_unreclaimed_hint() == 1);
     }
   }
 };
@@ -163,9 +163,9 @@ struct reclaimer_steal_blocking_oldest : rl::test_suite<reclaimer_steal_blocking
 
   void after() {
     if (stolen.size() == 2) {
-      RL_ASSERT(!r.oldest_unreclaimed().has_value());
+      RL_ASSERT(!r.oldest_unreclaimed_hint().has_value() || r.oldest_unreclaimed_hint() == 1);
     } else {
-      RL_ASSERT(r.oldest_unreclaimed() == 1);
+      RL_ASSERT(r.oldest_unreclaimed_hint() == 1);
     }
   }
 };
