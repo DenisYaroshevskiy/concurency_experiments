@@ -4,6 +4,7 @@ function(add_rl_test name source)
     add_executable(${name})
     target_sources(${name} PRIVATE ${source})
     target_compile_options(${name} PRIVATE ${compiler_options})
+    add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
 function(add_benchmark name source)

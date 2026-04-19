@@ -14,7 +14,7 @@ namespace tools {
 class condition_waiter : nomove {
  public:
   template <typename Pred>
-  void wait_until(Pred pred) {
+  void wait_if_not(Pred pred) {
     waiting_.store(true, memory_order_relaxed);
     tools::asymmetric_thread_fence_heavy();
     if (pred()) {

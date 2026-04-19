@@ -85,11 +85,11 @@ bool owner_stealer<T>::try_stealer_access(F&& f) {
 template <typename T>
 template <std::invocable<T&> F>
 void owner_stealer<T>::blocking_stealer_access(F&& f) {
-  if (try_stealer_access(std::forward<F>(f))) {
-    return;
+  while (!try_stealer_access(std::forward<F>(f))) {
+    waiter_.wait_if_not([&] {
+      return active_.load(tools::memory_order_relaxed) != nullptr;
+    });
   }
-  waiter_.wait_until(
-      [&] { return try_stealer_access(std::forward<F>(f); });
 }
 
 }  // namespace tools

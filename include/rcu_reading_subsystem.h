@@ -93,7 +93,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
     if (first_seen == 0 || first_seen >= desired) {
       return;
     }
-    waiter_.wait_until([&] {
+    waiter_.wait_if_not([&] {
       return counter_.load(tools::memory_order_relaxed) != first_seen;
     });
   }

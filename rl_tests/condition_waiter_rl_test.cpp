@@ -37,7 +37,7 @@ struct condition_waiter_one_wait
       state.store(3, rl::memory_order_relaxed);
       waiter.notify_if_waiting();
     } else {
-      waiter.wait_until([&] { return done(state.load(rl::memory_order_relaxed)); });
+      waiter.wait_if_not([&] { return done(state.load(rl::memory_order_relaxed)); });
       RL_ASSERT(done(state.load(rl::memory_order_relaxed)));
     }
   }
@@ -57,7 +57,7 @@ struct condition_waiter_abab : rl::test_suite<condition_waiter_abab, 2> {
       state.store(0, rl::memory_order_relaxed);
       waiter.notify_if_waiting();
     } else {
-      waiter.wait_until([&] { return done(state.load(rl::memory_order_relaxed)); });
+      waiter.wait_if_not([&] { return done(state.load(rl::memory_order_relaxed)); });
     }
   }
 };
