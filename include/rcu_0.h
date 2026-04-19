@@ -82,7 +82,7 @@ inline void rcu_domain::synchronize() {
     for (const auto* tls : tls_vec) {
       auto loaded = tls->counter.load(tools::memory_order_relaxed);
       if (loaded & 1) {
-        res.emplace_back(tls, tls->counter);
+        res.emplace_back(tls, loaded);
       }
     }
     return res;
