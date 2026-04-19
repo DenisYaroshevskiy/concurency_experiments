@@ -4,6 +4,8 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
+#pragma once
+
 #include <rcu_reading_subsystem.h>
 #include <utils.h>
 

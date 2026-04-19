@@ -4,6 +4,8 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
+#pragma once
+
 #include <atomic_wrappers.h>
 #include <owner_stealer.h>
 #include <rcu_reading_subsystem.h>
