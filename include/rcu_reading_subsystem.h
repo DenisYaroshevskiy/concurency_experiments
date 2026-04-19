@@ -82,7 +82,9 @@ class rcu_reading_subsystem::tls : tools::nomove {
 
     if (waiting_.load(tools::memory_order_relaxed)) [[unlikely]] {
       counter_.notify_one();
-      waiting_.store(false, tools::memory_order_relaxed);
+      // folly has this clear but it gives me a bug, when we reenter with the same
+      // generation - it's possible for the notify_one above to be mised.
+      // waiting_.store(false, tools::memory_order_relaxed);
     }
   }
 

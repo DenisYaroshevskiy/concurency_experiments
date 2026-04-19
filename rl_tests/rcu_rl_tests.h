@@ -138,6 +138,30 @@ struct rcu_test_min_sync : rcu_test_base<rcu_test_min_sync, Domain, 2> {
 };
 
 template <typename Domain>
+struct rcu_test_enter_twice : rcu_test_base<rcu_test_enter_twice, Domain, 2> {
+    void thread_read() {
+      auto tls = this->make_reader_tls($);
+      tls.enter();
+      tls.exit();
+      tls.enter();
+      tls.exit();
+  }
+
+  void thread_write() {
+    this->synchronize();
+  }
+
+  void thread_(unsigned idx) {
+    if (idx != 0) {
+      thread_read();
+    } else {
+      thread_write();
+    }
+  }
+};
+
+
+template <typename Domain>
 struct rcu_test_proper_sync : rcu_test_base<rcu_test_proper_sync, Domain, 3> {
   std::size_t kNumStages = 4;
 
@@ -339,6 +363,7 @@ bool minimal_test() {
   return simulate<rcu_test_no_mutation<Domain>>()
       && simulate<rcu_test_access_and_sync<Domain>>()
       && simulate<rcu_test_min_sync<Domain>>()
+      && simulate<rcu_test_enter_twice<Domain>>()
       && simulate<rcu_test_proper_sync<Domain>>()
       && simulate<rcu_test_sync_delete<Domain>>()
       && simulate<rcu_test_retire<Domain>>()
