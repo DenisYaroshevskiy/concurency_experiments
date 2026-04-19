@@ -89,6 +89,7 @@ struct rcu_domain::reclaim_tls : tools::nomove {
         gen, clean_up_task([x, d = std::move(d)]() mutable { d(x); }));
     if (cnt >= domain_->config_.retire_threshold) {
       domain_->garbage_collect();
+      reclaimer_->clean_ready_tasks(domain_->generation());
     }
   }
 };
