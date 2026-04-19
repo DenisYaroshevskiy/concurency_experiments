@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <condition_waiter.h>
 
 #include <array>
 #include <concepts>
@@ -54,10 +55,7 @@ class owner_stealer {
  private:
   std::array<tools::var<T>, 2> objs_;
   tools::atomic<tools::var<T>*> active_{&objs_[0]};
-  tools::atomic<bool> wait_{false};
-
-  void notify_stealer();
-  void wait_for_owner();
+  tools::condition_waiter waiter_;
 };
 
 template <typename T>
@@ -67,16 +65,7 @@ void owner_stealer<T>::owner_access(F&& f) {
   std::forward<F>(f)(ptr->write());
 
   active_.store(ptr, tools::memory_order_release);
-  tools::asymmetric_thread_fence_light();
-  if (wait_.load(tools::memory_order_relaxed)) [[unlikely]] {
-    notify_stealer();
-  }
-}
-
-template <typename T>
-void owner_stealer<T>::notify_stealer() {
-  active_.notify_one();
-  wait_.store(false, tools::memory_order_relaxed);
+  waiter_.notify_if_waiting();
 }
 
 template <typename T>
@@ -97,15 +86,10 @@ template <typename T>
 template <std::invocable<T&> F>
 void owner_stealer<T>::blocking_stealer_access(F&& f) {
   while (!try_stealer_access(std::forward<F>(f))) {
-    wait_for_owner();
+    waiter_.wait_if_not([&] {
+      return active_.load(tools::memory_order_relaxed) != nullptr;
+    });
   }
-}
-
-template <typename T>
-void owner_stealer<T>::wait_for_owner() {
-  wait_.store(true, tools::memory_order_relaxed);
-  tools::asymmetric_thread_fence_heavy();
-  active_.wait(nullptr, tools::memory_order_relaxed);
 }
 
 }  // namespace tools

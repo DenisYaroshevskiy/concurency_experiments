@@ -26,7 +26,7 @@
  *
  * garbage_collect() is the active reclaim path:
  *   1. If the domain hasn't checked for stale tasks in stale_gen_threshold
- *      generations, steal tasks whose oldest_unreclaimed is sufficiently old
+ *      generations, steal tasks whose oldest_unreclaimed_hint is sufficiently old
  *      from other threads' reclaimers (try_steal_tasks, non-blocking).
  *   2. synchronize() — advances the generation counter and waits for readers.
  *   3. Execute any stolen stale tasks (they are safe post-synchronize).
@@ -89,6 +89,7 @@ struct rcu_domain::reclaim_tls : tools::nomove {
         gen, clean_up_task([x, d = std::move(d)]() mutable { d(x); }));
     if (cnt >= domain_->config_.retire_threshold) {
       domain_->garbage_collect();
+      reclaimer_->clean_ready_tasks(domain_->generation());
     }
   }
 };
@@ -97,7 +98,7 @@ inline void rcu_domain::collect_stale_tasks(std::vector<clean_up_task>& out,
                                             counter_t current_gen) {
   tools::lock_guard _{reclaimer_vec_m};
   for (auto& r : reclaimer_vec) {
-    auto oldest = r->oldest_unreclaimed();
+    auto oldest = r->oldest_unreclaimed_hint();
     if (oldest && *oldest + config_.stale_gen_threshold <= current_gen) {
       r->try_steal_tasks(out);
     }

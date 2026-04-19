@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
+#include <condition_waiter.h>
 #include <utils.h>
 
 #include <algorithm>
@@ -77,13 +78,8 @@ class rcu_reading_subsystem::tls : tools::nomove {
     tools::asymmetric_thread_fence_light();
     counter_.store(0, tools::memory_order_relaxed);
 
-    // This light fence is to communicate with wait.
-    tools::asymmetric_thread_fence_light();
 
-    if (waiting_.load(tools::memory_order_relaxed)) [[unlikely]] {
-      counter_.notify_one();
-      waiting_.store(false, tools::memory_order_relaxed);
-    }
+    waiter_.notify_if_waiting();
   }
 
   bool is_reading(counter_t desired) const {
@@ -93,34 +89,13 @@ class rcu_reading_subsystem::tls : tools::nomove {
 
   // At most one waiter
   void wait(counter_t desired) {
-    counter_t cur = counter_.load(tools::memory_order_relaxed);
-    if (cur == 0 || cur >= desired) {
+    counter_t first_seen = counter_.load(tools::memory_order_relaxed);
+    if (first_seen == 0 || first_seen >= desired) {
       return;
     }
-    waiting_.store(true, tools::memory_order_relaxed);
-
-    // Makes sure that the reader will see the waiting signal before we sleep.
-    tools::asymmetric_thread_fence_heavy();
-
-    counter_.wait(cur, tools::memory_order_relaxed);
-    // Counter is guaranteed to have changed, that's why we don't need to check,
-    // that's how the wait API works.
-    // However, we can't really test `is_reading(desired)` - that might be false,
-    // because the reader might have re-entered the critical section with the same counter value.
-    // Good news is that we don't care, the - heavy fence from sync has to syncrhonize with light
-    // fence in entry, so we are OK.
-
-    // I'm not sure I need this fence.
-    // The goal here is to not clear the "waiting" signal before doing the wait.
-    // However it's possible that "wait" gives us enough ordering.
-    // Folly doesn't have this fence:
-    // https://github.com/facebook/folly/blob/main/folly/synchronization/detail/ThreadCachedReaders.h#L184
-    //
-    // It's also OK to just completely remove the next two lines - then only the
-    // reader clears the waiting_ signal - there is a tiny chance of an extra
-    // notification.
-    tools::asymmetric_thread_fence_heavy();
-    waiting_.store(false, tools::memory_order_relaxed);
+    waiter_.wait_if_not([&] {
+      return counter_.load(tools::memory_order_relaxed) != first_seen;
+    });
   }
 
  private:
@@ -130,7 +105,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
   // this is not the case where we expect it to be relevant.
   tools::atomic<counter_t> counter_{0};
   std::uint32_t nested_readers_ = 0;
-  tools::atomic<bool> waiting_{false};
+  tools::condition_waiter waiter_;
 
   rcu_reading_subsystem* subsystem_;
 };

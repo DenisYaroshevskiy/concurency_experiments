@@ -4,6 +4,7 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
+#pragma once
 
 #include <atomic_wrappers.h>
 #include <utils.h>
@@ -82,7 +83,7 @@ inline void rcu_domain::synchronize() {
     for (const auto* tls : tls_vec) {
       auto loaded = tls->counter.load(tools::memory_order_relaxed);
       if (loaded & 1) {
-        res.emplace_back(tls, tls->counter);
+        res.emplace_back(tls, loaded);
       }
     }
     return res;
