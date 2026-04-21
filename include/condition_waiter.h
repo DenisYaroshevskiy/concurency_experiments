@@ -11,18 +11,28 @@
 
 namespace tools {
 
+// One reader -
+// Two readers - one after the other
+// herd7
+
 class condition_waiter : nomove {
  public:
   template <typename Pred>
   void wait_if_not(Pred pred) {
     waiting_.store(true, memory_order_relaxed);
     tools::asymmetric_thread_fence_heavy();
+    // load waiting as true
+    // -> missed notification
+    // new reader - pred => false
     if (pred()) {
       waiting_.store(false, memory_order_relaxed);
       return;
     }
-    // Should there be a heavy fence here to prevent
-    // the loads on wait happening before pred.
+    // reader exits, waiting_ is false, no notification
+
+    // asymmetric_thread_fence_heavy 
+   
+    // waiting is going to wait
     waiting_.wait(true, memory_order_relaxed);
   }
 
