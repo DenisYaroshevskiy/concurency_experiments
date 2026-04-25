@@ -7,7 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
-#include <condition_waiter.h>
+#include <atomic_expensive_wait_cheap_notify.h>
 
 #include <array>
 #include <concepts>
@@ -55,7 +55,7 @@ class owner_stealer {
  private:
   std::array<tools::var<T>, 2> objs_;
   tools::atomic<tools::var<T>*> active_{&objs_[0]};
-  tools::condition_waiter waiter_;
+  tools::atomic_expensive_wait_cheap_notify waiter_;
 };
 
 template <typename T>
@@ -65,7 +65,7 @@ void owner_stealer<T>::owner_access(F&& f) {
   std::forward<F>(f)(ptr->write());
 
   active_.store(ptr, tools::memory_order_release);
-  waiter_.notify_if_waiting();
+  waiter_.notify_one(&active_);
 }
 
 template <typename T>
@@ -86,9 +86,7 @@ template <typename T>
 template <std::invocable<T&> F>
 void owner_stealer<T>::blocking_stealer_access(F&& f) {
   while (!try_stealer_access(std::forward<F>(f))) {
-    waiter_.wait_if_not([&] {
-      return active_.load(tools::memory_order_relaxed) != nullptr;
-    });
+    waiter_.wait(&active_, static_cast<tools::var<T>*>(nullptr));
   }
 }
 

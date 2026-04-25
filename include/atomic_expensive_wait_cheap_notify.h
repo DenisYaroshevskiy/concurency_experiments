@@ -11,22 +11,21 @@
 
 namespace tools {
 
-class condition_waiter : nomove {
+class atomic_expensive_wait_cheap_notify : nomove {
  public:
-  template <typename Pred>
-  void wait_if_not(Pred pred) {
+  template <typename T>
+  void wait(const tools::atomic<T>* obj, T old) {
     waiting_.store(true, memory_order_relaxed);
     tools::asymmetric_thread_fence_heavy();
-    if (pred()) {
+    if (obj->load(memory_order_relaxed) != old) {
       waiting_.store(false, memory_order_relaxed);
       return;
     }
-    // Should there be a heavy fence here to prevent
-    // the loads on wait happening before pred.
     waiting_.wait(true, memory_order_relaxed);
   }
 
-  void notify_if_waiting() {
+  template <typename T>
+  void notify_one(tools::atomic<T>*) {
     tools::asymmetric_thread_fence_light();
     if (waiting_.load(memory_order_relaxed)) {
       waiting_.store(false, memory_order_relaxed);
