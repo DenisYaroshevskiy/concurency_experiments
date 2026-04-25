@@ -11,25 +11,28 @@
 
 namespace tools {
 
+template <typename T>
 class atomic_expensive_wait_cheap_notify_simple : nomove {
  public:
-  template <typename T>
-  void wait(const tools::atomic<T>* obj, T old) {
+  explicit atomic_expensive_wait_cheap_notify_simple(tools::atomic<T>* obj)
+      : obj_(obj) {}
+
+  void wait(T old) {
     waiting_.store(true, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_heavy();
-    obj->wait(old, tools::memory_order_relaxed);
+    obj_->wait(old, tools::memory_order_relaxed);
     waiting_.store(false, tools::memory_order_relaxed);
   }
 
-  template <typename T>
-  void notify_one(tools::atomic<T>* obj) {
+  void notify_one() {
     tools::asymmetric_thread_fence_light();
     if (waiting_.load(tools::memory_order_relaxed)) {
-      obj->notify_one();
+      obj_->notify_one();
     }
   }
 
  private:
+  tools::atomic<T>* obj_;
   tools::atomic<bool> waiting_{false};
 };
 

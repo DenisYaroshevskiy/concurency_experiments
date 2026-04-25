@@ -16,25 +16,25 @@
 template <typename Waiter>
 struct notify_no_waiter_test : rl::test_suite<notify_no_waiter_test<Waiter>, 1> {
   tools::atomic<int> state{0};
-  Waiter waiter;
+  Waiter waiter{&state};
 
-  void thread(unsigned) { waiter.notify_one(&state); }
+  void thread(unsigned) { waiter.notify_one(); }
 };
 
 template <typename Waiter>
 struct one_wait_test : rl::test_suite<one_wait_test<Waiter>, 2> {
   tools::atomic<int> state{0};
-  Waiter waiter;
+  Waiter waiter{&state};
 
   void thread(unsigned idx) {
     if (idx == 0) {
       state.store(1, tools::memory_order_relaxed);
       state.store(0, tools::memory_order_relaxed);
-      waiter.notify_one(&state);
+      waiter.notify_one();
     } else {
       int old = state.load(tools::memory_order_relaxed);
       if (old) {
-        waiter.wait(&state, old);
+        waiter.wait(old);
       }
     }
   }
@@ -44,16 +44,16 @@ template <typename Waiter>
 struct one_wait_actual_waiting_test
     : rl::test_suite<one_wait_actual_waiting_test<Waiter>, 2> {
   tools::atomic<int> state{1};
-  Waiter waiter;
+  Waiter waiter{&state};
 
   void thread(unsigned idx) {
     if (idx == 0) {
       state.store(0, tools::memory_order_relaxed);
-      waiter.notify_one(&state);
+      waiter.notify_one();
     } else {
       int old = state.load(tools::memory_order_relaxed);
       if (old) {
-        waiter.wait(&state, old);
+        waiter.wait(old);
       }
       RL_ASSERT(state.load(tools::memory_order_relaxed) == 0);
     }
@@ -63,20 +63,20 @@ struct one_wait_actual_waiting_test
 template <typename Waiter>
 struct abab_test : rl::test_suite<abab_test<Waiter>, 2> {
   tools::atomic<int> state{1};
-  Waiter waiter;
+  Waiter waiter{&state};
 
   void thread(unsigned idx) {
     if (idx == 0) {
       state.store(1, tools::memory_order_relaxed);
       state.store(0, tools::memory_order_relaxed);
-      waiter.notify_one(&state);
+      waiter.notify_one();
       state.store(1, tools::memory_order_relaxed);
       state.store(0, tools::memory_order_relaxed);
-      waiter.notify_one(&state);
+      waiter.notify_one();
     } else {
       int old = state.load(tools::memory_order_relaxed);
       if (old) {
-        waiter.wait(&state, old);
+        waiter.wait(old);
       }
     }
   }

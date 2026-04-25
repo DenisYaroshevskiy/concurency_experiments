@@ -12,6 +12,6 @@
 #include "aewcn_rl_tests.h"
 
 int main() {
-  return run_all_aewcn_tests<tools::atomic_expensive_wait_cheap_notify_simple>()
+  return run_all_aewcn_tests<tools::atomic_expensive_wait_cheap_notify_simple<int>>()
       ? 0 : 1;
 }

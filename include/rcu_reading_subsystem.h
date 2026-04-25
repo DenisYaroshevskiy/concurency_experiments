@@ -79,7 +79,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
     counter_.store(0, tools::memory_order_relaxed);
 
 
-    waiter_.notify_one(&counter_);
+    waiter_.notify_one();
   }
 
   bool is_reading(counter_t desired) const {
@@ -93,7 +93,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
     if (first_seen == 0 || first_seen >= desired) {
       return;
     }
-    waiter_.wait(&counter_, first_seen);
+    waiter_.wait(first_seen);
   }
 
  private:
@@ -103,7 +103,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
   // this is not the case where we expect it to be relevant.
   tools::atomic<counter_t> counter_{0};
   std::uint32_t nested_readers_ = 0;
-  tools::atomic_expensive_wait_cheap_notify_simple waiter_;
+  tools::atomic_expensive_wait_cheap_notify_simple<counter_t> waiter_{&counter_};
 
   rcu_reading_subsystem* subsystem_;
 };
