@@ -52,6 +52,8 @@ struct wait_notify_test : rl::test_suite<wait_notify_test, 2> {
   }
 };
 
+
+// The standard https://eel.is/c++draft/atomics.wait
 struct just_wait_and_notify : rl::test_suite<just_wait_and_notify, 2> {
   rl::atomic<bool> waiting{true};
 
