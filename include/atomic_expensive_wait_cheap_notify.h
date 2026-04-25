@@ -21,6 +21,8 @@ class atomic_expensive_wait_cheap_notify : nomove {
       waiting_.store(false, memory_order_relaxed);
       return;
     }
+
+    // After a discussion we believe that this is a problem.
     waiting_.wait(true, memory_order_relaxed);
   }
 

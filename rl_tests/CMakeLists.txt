@@ -16,6 +16,7 @@ function(add_benchmark name source)
 endfunction()
 
 add_rl_test(atomic_expensive_wait_cheap_notify_rl_test atomic_expensive_wait_cheap_notify_rl_test.cpp)
+add_rl_test(relacy_relaxed_wait_bug relacy_relaxed_wait_bug.cpp)
 add_rl_test(atrocious_mutex_rl_test atrocious_mutex_rl_test.cpp)
 add_rl_test(rcu_0_test rcu_0_test.cpp)
 add_rl_test(rcu_1_test rcu_1_test.cpp)

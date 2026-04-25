@@ -64,7 +64,7 @@ struct one_wait_actual_waiting_test
 };
 
 
-// two criitcal sections, one wait
+// two critical sections, one wait
 struct abab_test : rl::test_suite<abab_test, 2> {
   tools::atomic<int> state{1};
   tools::atomic_expensive_wait_cheap_notify waiter;
