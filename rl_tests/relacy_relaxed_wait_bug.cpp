@@ -17,7 +17,7 @@ struct wait_notify_test : rl::test_suite<wait_notify_test, 2> {
 
     rl::atomic_thread_fence(rl::memory_order_seq_cst);
     if (waiting.load(rl::memory_order_relaxed)) {
-      waiting.store(false, rl::memory_order_relaxed); // MARKED
+      waiting.store(false, rl::memory_order_relaxed);  // MARKED
       waiting.notify_one();
     }
   }
@@ -52,8 +52,24 @@ struct wait_notify_test : rl::test_suite<wait_notify_test, 2> {
   }
 };
 
+struct just_wait_and_notify : rl::test_suite<just_wait_and_notify, 2> {
+  rl::atomic<bool> waiting{true};
+
+  void thread(unsigned idx) {
+    if (idx == 0) {
+      waiting.store(false, rl::memory_order_relaxed);
+      waiting.notify_one();
+    } else {
+      waiting.wait(true, rl::memory_order_relaxed);
+    }
+  }
+};
+
 int main() {
   rl::test_params params;
   params.search_type = rl::fair_full_search_scheduler_type;
-  return rl::simulate<wait_notify_test>(params) ? 0 : 1;
+  return rl::simulate<wait_notify_test>(params) &&
+                 rl::simulate<just_wait_and_notify>(params)
+             ? 0
+             : 1;
 }
