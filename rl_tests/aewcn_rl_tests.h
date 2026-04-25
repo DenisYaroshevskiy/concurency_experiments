@@ -4,10 +4,8 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
-#include "relacy/context.hpp"
-#include "relacy/thread_local.hpp"
-#define TOOLS_RL_TEST
-#include "atomic_expensive_wait_cheap_notify.h"
+#ifndef AEWCN_RL_TESTS_H
+#define AEWCN_RL_TESTS_H
 
 #include <relacy/relacy.hpp>
 #include <relacy/test_suite.hpp>
@@ -15,20 +13,18 @@
 
 #include "rl_simulate.h"
 
-
-// notify_one with no waiter must not crash or hang.
-struct notify_no_waiter_test
-    : rl::test_suite<notify_no_waiter_test, 1> {
+template <typename Waiter>
+struct notify_no_waiter_test : rl::test_suite<notify_no_waiter_test<Waiter>, 1> {
   tools::atomic<int> state{0};
-  tools::atomic_expensive_wait_cheap_notify waiter;
+  Waiter waiter;
 
   void thread(unsigned) { waiter.notify_one(&state); }
 };
 
-struct one_wait_test
-    : rl::test_suite<one_wait_test, 2> {
+template <typename Waiter>
+struct one_wait_test : rl::test_suite<one_wait_test<Waiter>, 2> {
   tools::atomic<int> state{0};
-  tools::atomic_expensive_wait_cheap_notify waiter;
+  Waiter waiter;
 
   void thread(unsigned idx) {
     if (idx == 0) {
@@ -44,10 +40,11 @@ struct one_wait_test
   }
 };
 
+template <typename Waiter>
 struct one_wait_actual_waiting_test
-    : rl::test_suite<one_wait_actual_waiting_test, 2> {
+    : rl::test_suite<one_wait_actual_waiting_test<Waiter>, 2> {
   tools::atomic<int> state{1};
-  tools::atomic_expensive_wait_cheap_notify waiter;
+  Waiter waiter;
 
   void thread(unsigned idx) {
     if (idx == 0) {
@@ -63,11 +60,10 @@ struct one_wait_actual_waiting_test
   }
 };
 
-
-// two critical sections, one wait
-struct abab_test : rl::test_suite<abab_test, 2> {
+template <typename Waiter>
+struct abab_test : rl::test_suite<abab_test<Waiter>, 2> {
   tools::atomic<int> state{1};
-  tools::atomic_expensive_wait_cheap_notify waiter;
+  Waiter waiter;
 
   void thread(unsigned idx) {
     if (idx == 0) {
@@ -86,9 +82,12 @@ struct abab_test : rl::test_suite<abab_test, 2> {
   }
 };
 
-int main() {
-  return (simulate_exhaustive<notify_no_waiter_test>()
-       && simulate_exhaustive<one_wait_test>()
-       && simulate_exhaustive<one_wait_actual_waiting_test>()
-       && simulate<abab_test>()) ? 0 : 1;
+template <typename Waiter>
+bool run_all_aewcn_tests() {
+  return simulate_exhaustive<notify_no_waiter_test<Waiter>>()
+      && simulate_exhaustive<one_wait_test<Waiter>>()
+      && simulate_exhaustive<one_wait_actual_waiting_test<Waiter>>()
+      && simulate<abab_test<Waiter>>();
 }
+
+#endif  // AEWCN_RL_TESTS_H

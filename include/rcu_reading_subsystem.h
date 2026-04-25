@@ -7,7 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
-#include <atomic_expensive_wait_cheap_notify.h>
+#include <atomic_expensive_wait_cheap_notify_simple.h>
 #include <utils.h>
 
 #include <algorithm>
@@ -103,7 +103,7 @@ class rcu_reading_subsystem::tls : tools::nomove {
   // this is not the case where we expect it to be relevant.
   tools::atomic<counter_t> counter_{0};
   std::uint32_t nested_readers_ = 0;
-  tools::atomic_expensive_wait_cheap_notify waiter_;
+  tools::atomic_expensive_wait_cheap_notify_simple waiter_;
 
   rcu_reading_subsystem* subsystem_;
 };

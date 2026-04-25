@@ -7,7 +7,7 @@
 #pragma once
 
 #include <atomic_wrappers.h>
-#include <atomic_expensive_wait_cheap_notify.h>
+#include <atomic_expensive_wait_cheap_notify_simple.h>
 
 #include <array>
 #include <concepts>
@@ -55,7 +55,7 @@ class owner_stealer {
  private:
   std::array<tools::var<T>, 2> objs_;
   tools::atomic<tools::var<T>*> active_{&objs_[0]};
-  tools::atomic_expensive_wait_cheap_notify waiter_;
+  tools::atomic_expensive_wait_cheap_notify_simple waiter_;
 };
 
 template <typename T>

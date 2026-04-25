@@ -11,27 +11,21 @@
 
 namespace tools {
 
-class atomic_expensive_wait_cheap_notify : nomove {
+class atomic_expensive_wait_cheap_notify_simple : nomove {
  public:
   template <typename T>
   void wait(const tools::atomic<T>* obj, T old) {
-    waiting_.store(true, memory_order_relaxed);
+    waiting_.store(true, tools::memory_order_relaxed);
     tools::asymmetric_thread_fence_heavy();
-    if (obj->load(memory_order_relaxed) != old) {
-      waiting_.store(false, memory_order_relaxed);
-      return;
-    }
-
-    // After a discussion we believe that this is a problem.
-    waiting_.wait(true, memory_order_relaxed);
+    obj->wait(old, tools::memory_order_relaxed);
+    waiting_.store(false, tools::memory_order_relaxed);
   }
 
   template <typename T>
-  void notify_one(tools::atomic<T>*) {
+  void notify_one(tools::atomic<T>* obj) {
     tools::asymmetric_thread_fence_light();
-    if (waiting_.load(memory_order_relaxed)) {
-      waiting_.store(false, memory_order_relaxed);
-      waiting_.notify_one();
+    if (waiting_.load(tools::memory_order_relaxed)) {
+      obj->notify_one();
     }
   }
 
