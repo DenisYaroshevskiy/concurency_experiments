@@ -14,9 +14,7 @@ namespace tools {
 struct atrocious_mutex {
  public:
   void lock() {
-    bool val = false;
     while (!locked.compare_exchange_weak(val, true, tools::memory_order_acquire)) {
-      val = false;
       this_thread_yield();
     }
   }
