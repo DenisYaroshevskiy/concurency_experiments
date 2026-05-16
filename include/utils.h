@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <utility>
+
 namespace tools {
 
 struct nomove {
@@ -14,6 +16,14 @@ struct nomove {
   nomove(nomove&&) = delete;
   nomove& operator=(const nomove&) = delete;
   nomove& operator=(nomove&&) = delete;
+};
+
+template <typename F>
+struct [[nodiscard]] scope_exit {
+  F f_;
+  explicit scope_exit(F f) : f_(std::move(f)) {}
+  ~scope_exit() { f_(); }
+  scope_exit(scope_exit&&) = delete;
 };
 
 }  // namespace tools
