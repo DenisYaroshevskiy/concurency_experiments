@@ -4,7 +4,6 @@
 // (See accompanying file LICENSE.md or copy at https://www.boost.org/LICENSE_1_0.txt)
 // clang-format on
 
-
 #pragma once
 
 #include "atomic_wrappers.h"
@@ -13,12 +12,17 @@ namespace tools {
 
 struct atrocious_mutex {
  public:
+  void lock(auto) { lock(); }
   void lock() {
-    while (!locked.compare_exchange_weak(val, true, tools::memory_order_acquire)) {
+    bool val = false;  // for the compare exchange api
+    while (
+        !locked.compare_exchange_weak(val, true, tools::memory_order_acquire)) {
+      val = false;
       this_thread_yield();
     }
   }
 
+  void unlock(auto) { unlock(); }
   void unlock() { locked.store(false, tools::memory_order_release); }
 
  private:

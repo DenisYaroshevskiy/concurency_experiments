@@ -26,5 +26,6 @@ add_rl_test(owner_stealer_rl_test owner_stealer_rl_test.cpp)
 add_rl_test(shared_ptr_rl_test shared_ptr_rl_test.cpp)
 add_rl_test(rcu_tls_reclaimer_rl_test rcu_tls_reclaimer_rl_test.cpp)
 add_rl_test(rcu_3_test rcu_3_test.cpp)
+add_rl_test(mutex_experiments_rl_test mutex_experiments_rl_test.cpp)
 
 add_benchmark(compare_exchange_vs_two_loads compare_exchange_vs_two_loads.cpp)
